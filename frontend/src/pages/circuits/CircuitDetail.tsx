@@ -1,25 +1,25 @@
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Trophy, Clock, TrendingUp, MapPin } from 'lucide-react'
+import { ArrowLeft, Trophy, Clock, TrendingUp, MapPin, Pencil } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { circuitsApi } from '@/services/api/circuits.api'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { formatLapTime } from '@/utils/lapStatistics'
 
 export default function CircuitDetail() {
-  const { circuitId } = useParams<{ circuitId: string }>()
+  const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
   const { data: circuit, isLoading } = useQuery({
-    queryKey: ['circuit', circuitId],
-    queryFn: () => circuitsApi.getById(circuitId!),
-    enabled: !!circuitId,
+    queryKey: ['circuit', id],
+    queryFn: () => circuitsApi.getById(id!),
+    enabled: !!id,
   })
 
   const { data: records = [] } = useQuery({
-    queryKey: ['circuit-records', circuitId],
-    queryFn: () => circuitsApi.getRecords(circuitId!),
-    enabled: !!circuitId,
+    queryKey: ['circuit-records', id],
+    queryFn: () => circuitsApi.getRecords(id!),
+    enabled: !!id,
   })
 
   if (isLoading) return <div className="skeleton h-64 rounded-xl" />
@@ -39,12 +39,15 @@ export default function CircuitDetail() {
         <button onClick={() => navigate(-1)} className="text-smc-muted hover:text-smc-text">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="section-title mb-0">{circuit.name}</h1>
           <p className="text-sm text-smc-muted flex items-center gap-1">
             <MapPin className="w-3.5 h-3.5" /> {circuit.city}, {circuit.country}
           </p>
         </div>
+        <Link to={`/circuits/${id}/edit`} className="btn-secondary flex items-center gap-2">
+          <Pencil className="w-4 h-4" /> Editar
+        </Link>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

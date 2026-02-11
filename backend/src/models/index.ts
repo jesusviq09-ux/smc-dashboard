@@ -323,20 +323,21 @@ Message.init({
 // GOAL
 // ============================================================
 export class Goal extends Model {
-  declare id: string; declare type: string; declare pilotId?: string; declare title: string
-  declare description?: string; declare metric: string; declare currentValue: number
-  declare targetValue: number; declare unit: string; declare deadline: string
-  declare status: string; declare progress: number
+  declare id: string; declare type: string; declare pilotId?: string; declare vehicleId?: string
+  declare title: string; declare description?: string; declare metric: string
+  declare currentValue: number; declare targetValue: number; declare unit: string
+  declare deadline: string; declare status: string; declare progress: number
 }
 Goal.init({
   id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
   type: { type: DataTypes.STRING, allowNull: false },
   pilotId: DataTypes.UUID,
+  vehicleId: DataTypes.STRING,
   title: { type: DataTypes.STRING, allowNull: false },
   description: DataTypes.TEXT,
-  metric: { type: DataTypes.STRING, allowNull: false },
+  metric: { type: DataTypes.STRING, defaultValue: '' },
   currentValue: { type: DataTypes.FLOAT, defaultValue: 0 },
-  targetValue: { type: DataTypes.FLOAT, allowNull: false },
+  targetValue: { type: DataTypes.FLOAT, defaultValue: 100 },
   unit: { type: DataTypes.STRING, defaultValue: '' },
   deadline: { type: DataTypes.DATEONLY, allowNull: false },
   status: { type: DataTypes.STRING, defaultValue: 'in_progress' },
@@ -382,6 +383,21 @@ PilotRatingHistory.init({
   weightedScore: DataTypes.FLOAT,
   notes: DataTypes.TEXT,
 }, { sequelize, modelName: 'PilotRatingHistory', tableName: 'pilot_rating_history', timestamps: false })
+
+// ============================================================
+// USER
+// ============================================================
+export class User extends Model {
+  declare id: string; declare email: string; declare passwordHash: string
+  declare name: string; declare department: string
+}
+User.init({
+  id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
+  email: { type: DataTypes.STRING, allowNull: false, unique: true },
+  passwordHash: { type: DataTypes.STRING, allowNull: false },
+  name: { type: DataTypes.STRING, allowNull: false },
+  department: { type: DataTypes.STRING, allowNull: false, defaultValue: 'technical' },
+}, { sequelize, modelName: 'User', tableName: 'users', timestamps: true })
 
 export async function syncModels() {
   await sequelize.sync({ alter: true })

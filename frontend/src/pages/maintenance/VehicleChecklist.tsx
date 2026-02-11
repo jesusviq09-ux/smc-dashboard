@@ -31,6 +31,8 @@ export default function VehicleChecklist() {
   const [type, setType] = useState<'pre_race' | 'post_race'>('pre_race')
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [signedBy, setSignedBy] = useState('')
+  const [signatureText, setSignatureText] = useState('')
+  const [signatureDate, setSignatureDate] = useState(new Date().toISOString().split('T')[0])
   const [saved, setSaved] = useState(false)
 
   const vehicle = useLiveQuery(() => db.vehicles.get(vehicleId!), [vehicleId])
@@ -44,7 +46,7 @@ export default function VehicleChecklist() {
       id: crypto.randomUUID(),
       vehicleId: vehicleId!,
       type,
-      date: new Date().toISOString(),
+      date: signatureDate,
       items: items.map(item => ({
         id: item.id,
         checklistId: '',
@@ -52,7 +54,7 @@ export default function VehicleChecklist() {
         checked: checked[item.id] ?? false,
         critical: item.critical,
       })),
-      signedBy,
+      signedBy: `${signedBy}${signatureText ? ` — Firma: ${signatureText}` : ''}`,
       completedAt: new Date().toISOString(),
     })
     setSaved(true)
@@ -100,24 +102,54 @@ export default function VehicleChecklist() {
             ))}
           </div>
 
-          <div className="border-t border-smc-border pt-4">
-            <div className="flex items-center justify-between mb-4">
+          <div className="border-t border-smc-border pt-4 space-y-3">
+            <div className="flex items-center justify-between">
               <span className="text-sm text-smc-muted">{totalChecked}/{items.length} completados</span>
-              {!allCriticalChecked && <span className="badge-red text-xs">Faltan ítems críticos</span>}
+              {!allCriticalChecked && (
+                <span className="badge-yellow text-xs">⚠️ Hay ítems críticos sin completar</span>
+              )}
             </div>
-            <div className="flex gap-3">
-              <input
-                type="text"
-                placeholder="Firmado por..."
-                className="input-field flex-1"
-                value={signedBy}
-                onChange={e => setSignedBy(e.target.value)}
-              />
-              <button onClick={handleSave} disabled={!allCriticalChecked} className="btn-primary flex items-center gap-2">
-                <Save className="w-4 h-4" />
-                {saved ? '¡Guardado!' : 'Firmar'}
-              </button>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="form-label">Nombre del firmante *</label>
+                <input
+                  type="text"
+                  placeholder="Nombre y apellidos"
+                  className="input-field"
+                  value={signedBy}
+                  onChange={e => setSignedBy(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="form-label">Fecha *</label>
+                <input
+                  type="date"
+                  className="input-field"
+                  value={signatureDate}
+                  onChange={e => setSignatureDate(e.target.value)}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="form-label">Firma (escribe tu nombre en cursiva o iniciales)</label>
+                <input
+                  type="text"
+                  placeholder="Firma..."
+                  className="input-field italic font-serif text-lg"
+                  value={signatureText}
+                  onChange={e => setSignatureText(e.target.value)}
+                />
+              </div>
             </div>
+
+            <button
+              onClick={handleSave}
+              disabled={!signedBy || !signatureDate || saved}
+              className="btn-primary w-full flex items-center justify-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              {saved ? '¡Checklist firmado y guardado!' : 'Firmar y guardar'}
+            </button>
           </div>
         </CardContent>
       </Card>

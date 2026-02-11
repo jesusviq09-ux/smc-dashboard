@@ -15,6 +15,7 @@ import telemetryRouter from './routes/telemetry.routes'
 import messagesRouter from './routes/messages.routes'
 import goalsRouter from './routes/goals.routes'
 import exportsRouter from './routes/exports.routes'
+import authRouter from './routes/auth.routes'
 
 const app = express()
 
@@ -51,6 +52,7 @@ app.use('/api/messages', messagesRouter)
 app.use('/api/briefings', messagesRouter)
 app.use('/api/goals', goalsRouter)
 app.use('/api/exports', exportsRouter)
+app.use('/api/auth', authRouter)
 
 // Health check
 app.get('/api/health', (_req, res) => {

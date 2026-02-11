@@ -3,9 +3,11 @@ import { useQuery } from '@tanstack/react-query'
 import { Send, MessageSquare } from 'lucide-react'
 import { communicationApi } from '@/services/api/communication.api'
 import { io, Socket } from 'socket.io-client'
+import { getStoredUser } from '@/hooks/useAuth'
 import type { Message } from '@/types'
 
 export default function ChatIndex() {
+  const currentUser = getStoredUser()
   const [channel, setChannel] = useState<'general' | 'strategy' | 'technical'>('general')
   const [text, setText] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
@@ -35,7 +37,7 @@ export default function ChatIndex() {
     if (!text.trim()) return
     const payload: Record<string, unknown> = {
       channel,
-      senderName: 'Coach',
+      senderName: currentUser?.name ?? 'Equipo',
       content: text.trim(),
       timestamp: new Date().toISOString(),
     }

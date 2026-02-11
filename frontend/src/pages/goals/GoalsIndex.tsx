@@ -5,6 +5,12 @@ import { Card, CardContent } from '@/components/ui/Card'
 import { goalsApi } from '@/services/api/goals.api'
 import type { Goal, GoalStatus } from '@/types'
 
+const VEHICLES = [
+  { id: '', label: 'Todos los coches' },
+  { id: 'smc01', label: 'SMC 01' },
+  { id: 'smc02', label: 'SMC 02 EVO' },
+]
+
 type GoalStatusExt = GoalStatus | 'pending'
 
 const STATUS_CONFIG: Record<GoalStatusExt, { label: string; icon: React.ComponentType<{ className?: string }>; color: string; badge: string }> = {
@@ -23,13 +29,16 @@ export default function GoalsIndex() {
   const qc = useQueryClient()
   const [showNew, setShowNew] = useState(false)
   const [filter, setFilter] = useState<'all' | GoalStatus>('all')
-  const [form, setForm] = useState({ title: '', description: '', type: 'team' as 'pilot' | 'team', deadline: '', pilotId: '' })
+  const [vehicleFilter, setVehicleFilter] = useState('')
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [form, setForm] = useState({ title: '', description: '', type: 'team' as 'pilot' | 'team', deadline: '', pilotId: '', vehicleId: '' })
 
   const { data: goals = [], isLoading } = useQuery({ queryKey: ['goals'], queryFn: goalsApi.getAll })
 
   const saveMutation = useMutation({
     mutationFn: goalsApi.create,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['goals'] }); setShowNew(false); resetForm() },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['goals'] }); setShowNew(false); resetForm(); setSaveError(null) },
+    onError: (err: any) => setSaveError(err?.response?.data?.error || err?.message || 'Error al guardar el objetivo'),
   })
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Goal> }) => goalsApi.update(id, data),
@@ -40,9 +49,11 @@ export default function GoalsIndex() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['goals'] }),
   })
 
-  const resetForm = () => setForm({ title: '', description: '', type: 'team', deadline: '', pilotId: '' })
+  const resetForm = () => setForm({ title: '', description: '', type: 'team', deadline: '', pilotId: '', vehicleId: '' })
 
-  const filtered = filter === 'all' ? goals : goals.filter(g => g.status === filter)
+  const filtered = goals
+    .filter(g => filter === 'all' || g.status === filter)
+    .filter(g => !vehicleFilter || (g as any).vehicleId === vehicleFilter)
   const counts = {
     all: goals.length,
     in_progress: goals.filter(g => g.status === 'in_progress').length,
@@ -60,13 +71,18 @@ export default function GoalsIndex() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-2 flex-wrap">
+      <div className="flex gap-2 flex-wrap items-center">
         {([['all', 'Todos'], ['in_progress', 'En curso'], ['completed', 'Completado'], ['overdue', 'Vencido']] as const).map(([val, label]) => (
           <button key={val} onClick={() => setFilter(val)}
             className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filter === val ? 'bg-primary text-smc-dark' : 'bg-smc-card text-smc-muted border border-smc-border hover:text-smc-text'}`}>
             {label} ({counts[val as keyof typeof counts] ?? 0})
           </button>
         ))}
+        <div className="ml-auto">
+          <select className="input-field py-1 text-xs" value={vehicleFilter} onChange={e => setVehicleFilter(e.target.value)}>
+            {VEHICLES.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+          </select>
+        </div>
       </div>
 
       {showNew && (
@@ -86,18 +102,40 @@ export default function GoalsIndex() {
                   </select>
                 </div>
                 <div>
-                  <label className="form-label">Fecha límite</label>
-                  <input type="date" className="input-field" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} />
+                  <label className="form-label">Coche (opcional)</label>
+                  <select className="input-field" value={form.vehicleId} onChange={e => setForm(f => ({ ...f, vehicleId: e.target.value }))}>
+                    <option value="">Sin coche específico</option>
+                    <option value="smc01">SMC 01</option>
+                    <option value="smc02">SMC 02 EVO</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="form-label">Fecha límite *</label>
+                  <input type="date" className="input-field" value={form.deadline} onChange={e => setForm(f => ({ ...f, deadline: e.target.value }))} required />
                 </div>
               </div>
               <div>
                 <label className="form-label">Descripción</label>
                 <textarea className="input-field min-h-[70px]" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
               </div>
+              {saveError && (
+                <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                  {saveError}
+                </div>
+              )}
               <div className="flex gap-2 justify-end">
-                <button onClick={() => { setShowNew(false); resetForm() }} className="btn-secondary">Cancelar</button>
-                <button onClick={() => saveMutation.mutate({ ...form, status: 'in_progress', progress: 0, createdAt: new Date().toISOString() } as any)}
-                  disabled={!form.title || saveMutation.isPending} className="btn-primary">
+                <button onClick={() => { setShowNew(false); resetForm(); setSaveError(null) }} className="btn-secondary">Cancelar</button>
+                <button onClick={() => saveMutation.mutate({
+                  ...form,
+                  status: 'in_progress',
+                  progress: 0,
+                  metric: '',
+                  currentValue: 0,
+                  targetValue: 100,
+                  unit: '',
+                  createdAt: new Date().toISOString(),
+                } as any)}
+                  disabled={!form.title || !form.deadline || saveMutation.isPending} className="btn-primary">
                   {saveMutation.isPending ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>

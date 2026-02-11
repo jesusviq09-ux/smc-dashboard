@@ -1,7 +1,8 @@
-import { Menu, Wifi, WifiOff, Bell, RefreshCw } from 'lucide-react'
+import { Menu, Wifi, WifiOff, Bell, RefreshCw, LogOut } from 'lucide-react'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { useSyncStore } from '@/store/syncStore'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { getStoredUser } from '@/hooks/useAuth'
 
 const pageTitles: Record<string, string> = {
   '/dashboard': 'Dashboard',
@@ -25,6 +26,13 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
   const isOnline = useOnlineStatus()
   const { pendingCount, isSyncing } = useSyncStore()
   const location = useLocation()
+  const navigate = useNavigate()
+  const currentUser = getStoredUser()
+
+  const handleLogout = () => {
+    localStorage.removeItem('smc_auth')
+    navigate('/login')
+  }
 
   const getTitle = () => {
     const path = '/' + location.pathname.split('/')[1]
@@ -72,6 +80,19 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
         <button className="relative p-2 rounded-lg hover:bg-smc-card text-smc-muted hover:text-smc-text">
           <Bell className="w-4 h-4" />
         </button>
+
+        {/* User + Logout */}
+        {currentUser && (
+          <div className="flex items-center gap-2 pl-2 border-l border-smc-border">
+            <div className="hidden sm:flex flex-col items-end">
+              <span className="text-xs font-medium text-white">{currentUser.name}</span>
+              <span className="text-xs text-smc-muted capitalize">{currentUser.department}</span>
+            </div>
+            <button onClick={handleLogout} className="p-2 rounded-lg hover:bg-smc-card text-smc-muted hover:text-danger" title="Cerrar sesión">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
     </header>
   )
