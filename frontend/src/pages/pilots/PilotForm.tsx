@@ -8,7 +8,7 @@ import { pilotsApi } from '@/services/api/pilots.api'
 import { Card, CardContent } from '@/components/ui/Card'
 import ScoreRing from '@/components/ui/ScoreRing'
 import { RATING_LABELS, RATING_WEIGHTS, calculateWeightedScore } from '@/utils/pilotScore'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { PilotRatings } from '@/types'
 
 const pilotSchema = z.object({
@@ -37,6 +37,7 @@ export default function PilotForm() {
   const isEditing = !!id
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const { data: existingPilot } = useQuery({
     queryKey: ['pilot', id],
@@ -82,6 +83,9 @@ export default function PilotForm() {
       queryClient.invalidateQueries({ queryKey: ['pilots'] })
       navigate(`/pilots/${pilot.id}`)
     },
+    onError: (error: any) => {
+      setSaveError(`Error al guardar. Comprueba que el servidor está disponible.${error?.message ? ` (${error.message})` : ''}`)
+    },
   })
 
   const watchedRatings = watch('ratings')
@@ -92,7 +96,7 @@ export default function PilotForm() {
   )
   const weightPenalty = Math.max(0, Math.floor((watchedWeight - 50) / 10)) * 0.2
 
-  const onSubmit = (data: PilotFormData) => mutation.mutate(data)
+  const onSubmit = (data: PilotFormData) => { setSaveError(null); mutation.mutate(data) }
 
   const RATING_KEYS = ['experience', 'driving', 'energyManagement', 'teamwork', 'consistency', 'adaptation'] as const
 
@@ -194,6 +198,12 @@ export default function PilotForm() {
             </div>
           </CardContent>
         </Card>
+
+        {saveError && (
+          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {saveError}
+          </div>
+        )}
 
         <div className="flex gap-3 justify-end">
           <Link to="/pilots" className="btn-secondary">Cancelar</Link>

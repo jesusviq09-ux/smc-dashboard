@@ -1,4 +1,5 @@
 import { useForm, Controller } from 'react-hook-form'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
 import { ChevronLeft, Save, AlertTriangle } from 'lucide-react'
@@ -21,6 +22,7 @@ const OBJECTIVES: { value: TrainingObjective; label: string }[] = [
 export default function NewSession() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const locations = useLiveQuery(() => db.trainingLocations.toArray(), [])
   const vehicles = useLiveQuery(() => db.vehicles.toArray(), [])
@@ -63,6 +65,9 @@ export default function NewSession() {
       queryClient.invalidateQueries({ queryKey: ['training-sessions'] })
       navigate(`/training/${session.id}`)
     },
+    onError: (error: any) => {
+      setSaveError(`Error al guardar. Comprueba que el servidor está disponible.${error?.message ? ` (${error.message})` : ''}`)
+    },
   })
 
   const handleObjectiveToggle = (value: TrainingObjective, current: TrainingObjective[]) => {
@@ -80,7 +85,7 @@ export default function NewSession() {
         <h1 className="text-2xl font-bold text-white">Nueva sesión de entrenamiento</h1>
       </div>
 
-      <form onSubmit={handleSubmit(data => mutation.mutate(data as any))} className="space-y-6">
+      <form onSubmit={handleSubmit(data => { setSaveError(null); mutation.mutate(data as any) })} className="space-y-6">
         <Card title="Información de la sesión">
           <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -206,6 +211,12 @@ export default function NewSession() {
             )} />
           </CardContent>
         </Card>
+
+        {saveError && (
+          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {saveError}
+          </div>
+        )}
 
         <div className="flex gap-3 justify-end">
           <Link to="/training" className="btn-secondary">Cancelar</Link>

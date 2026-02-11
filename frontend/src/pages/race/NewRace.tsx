@@ -1,4 +1,5 @@
 import { useForm, Controller } from 'react-hook-form'
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
 import { ChevronLeft, Save } from 'lucide-react'
@@ -9,6 +10,7 @@ import { RaceCategory } from '@/types'
 export default function NewRace() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const { control, handleSubmit, watch } = useForm({
     defaultValues: {
@@ -29,6 +31,9 @@ export default function NewRace() {
       queryClient.invalidateQueries({ queryKey: ['race-events'] })
       navigate(`/races/${event.id}`)
     },
+    onError: (error: any) => {
+      setSaveError(`Error al guardar. Comprueba que el servidor está disponible.${error?.message ? ` (${error.message})` : ''}`)
+    },
   })
 
   const toggleCategory = (cat: RaceCategory, current: RaceCategory[]) =>
@@ -43,7 +48,7 @@ export default function NewRace() {
         <h1 className="text-2xl font-bold text-white">Nueva carrera</h1>
       </div>
 
-      <form onSubmit={handleSubmit(data => mutation.mutate(data))} className="space-y-6">
+      <form onSubmit={handleSubmit(data => { setSaveError(null); mutation.mutate(data) })} className="space-y-6">
         <Card title="Datos del evento">
           <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
@@ -104,6 +109,12 @@ export default function NewRace() {
             )} />
           </CardContent>
         </Card>
+
+        {saveError && (
+          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {saveError}
+          </div>
+        )}
 
         <div className="flex gap-3 justify-end">
           <Link to="/races" className="btn-secondary">Cancelar</Link>
