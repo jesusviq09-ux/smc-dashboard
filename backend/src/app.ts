@@ -16,6 +16,8 @@ import messagesRouter from './routes/messages.routes'
 import goalsRouter from './routes/goals.routes'
 import exportsRouter from './routes/exports.routes'
 import authRouter from './routes/auth.routes'
+import adminRouter from './routes/admin.routes'
+import noticesRouter from './routes/notices.routes'
 
 const app = express()
 
@@ -56,6 +58,8 @@ app.use('/api/briefings', messagesRouter)
 app.use('/api/goals', goalsRouter)
 app.use('/api/exports', exportsRouter)
 app.use('/api/auth', authRouter)
+app.use('/api/admin', adminRouter)
+app.use('/api/notices', noticesRouter)
 
 // Health check
 app.get('/api/health', (_req, res) => {

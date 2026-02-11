@@ -8,6 +8,12 @@ import { db } from '@/services/indexeddb/db'
 import { apiClient } from '@/services/api/client'
 import type { SparePart } from '@/types'
 
+function stockStatus(part: SparePart): 'ok' | 'atMin' | 'belowMin' {
+  if (part.stock < part.minStock) return 'belowMin'
+  if (part.stock === part.minStock) return 'atMin'
+  return 'ok'
+}
+
 export default function SpareParts() {
   const qc = useQueryClient()
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -41,7 +47,9 @@ export default function SpareParts() {
 
   const resetForm = () => setForm({ name: '', vehicleId: 'smc01', stock: 0, minStock: 1, unit: 'unidad' })
 
-  const lowStockParts = parts.filter(p => p.stock <= p.minStock)
+  const atMinParts = parts.filter(p => stockStatus(p) === 'atMin')
+  const belowMinParts = parts.filter(p => stockStatus(p) === 'belowMin')
+  const alertParts = [...belowMinParts, ...atMinParts]
   const partsByVehicle = vehicles?.map(v => ({
     vehicle: v,
     parts: parts.filter(p => p.vehicleId === v.id),
@@ -63,15 +71,29 @@ export default function SpareParts() {
         </button>
       </div>
 
-      {lowStockParts.length > 0 && (
+      {belowMinParts.length > 0 && (
         <div className="bg-danger/10 border border-danger/30 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle className="w-4 h-4 text-danger" />
-            <span className="text-sm font-semibold text-danger">Stock bajo ({lowStockParts.length} artículo{lowStockParts.length !== 1 ? 's' : ''})</span>
+            <span className="text-sm font-semibold text-danger">Stock crítico — por debajo del mínimo ({belowMinParts.length} artículo{belowMinParts.length !== 1 ? 's' : ''})</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {lowStockParts.map(p => (
+            {belowMinParts.map(p => (
               <span key={p.id} className="badge-red text-xs">{p.name}: {p.stock}/{p.minStock} {p.unit}</span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {atMinParts.length > 0 && (
+        <div className="bg-warning/10 border border-warning/30 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="w-4 h-4 text-warning" />
+            <span className="text-sm font-semibold text-warning">Stock en el mínimo ({atMinParts.length} artículo{atMinParts.length !== 1 ? 's' : ''})</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {atMinParts.map(p => (
+              <span key={p.id} className="badge-yellow text-xs">{p.name}: {p.stock}/{p.minStock} {p.unit}</span>
             ))}
           </div>
         </div>
@@ -121,32 +143,51 @@ export default function SpareParts() {
               <p className="text-sm text-smc-muted text-center py-4">Sin repuestos registrados</p>
             ) : (
               <div className="space-y-2">
-                {vParts.map(part => (
-                  <div key={part.id} className={`flex items-center gap-3 p-3 rounded-lg border ${part.stock <= part.minStock ? 'border-danger/30 bg-danger/5' : 'border-smc-border'}`}>
-                    <Package className={`w-4 h-4 flex-shrink-0 ${part.stock <= part.minStock ? 'text-danger' : 'text-smc-muted'}`} />
-                    {editingId === part.id ? (
-                      <>
-                        <input className="input-field flex-1 text-sm py-1" value={editForm.name ?? ''} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
-                        <input type="number" min={0} className="input-field w-20 text-sm py-1" value={editForm.stock ?? 0} onChange={e => setEditForm(f => ({ ...f, stock: Number(e.target.value) }))} />
-                        <span className="text-smc-muted text-xs">/</span>
-                        <input type="number" min={0} className="input-field w-20 text-sm py-1" value={editForm.minStock ?? 1} onChange={e => setEditForm(f => ({ ...f, minStock: Number(e.target.value) }))} />
-                        <button onClick={() => updateMutation.mutate({ id: part.id, data: editForm })} className="text-success hover:text-success/80"><Check className="w-4 h-4" /></button>
-                        <button onClick={() => setEditingId(null)} className="text-smc-muted hover:text-smc-text"><X className="w-4 h-4" /></button>
-                      </>
-                    ) : (
-                      <>
-                        <span className="flex-1 text-sm text-smc-text">{part.name}</span>
-                        <span className={`text-sm font-semibold ${part.stock <= part.minStock ? 'text-danger' : 'text-success'}`}>
-                          {part.stock} {part.unit}
-                        </span>
-                        <span className="text-xs text-smc-muted">mín. {part.minStock}</span>
-                        {part.stock <= part.minStock && <AlertTriangle className="w-3.5 h-3.5 text-danger" />}
-                        <button onClick={() => startEdit(part)} className="text-smc-muted hover:text-smc-text ml-1"><Edit2 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => deleteMutation.mutate(part.id)} className="text-smc-muted hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </>
-                    )}
-                  </div>
-                ))}
+                {vParts.map(part => {
+                  const status = stockStatus(part)
+                  const rowClass = status === 'belowMin'
+                    ? 'border-danger/30 bg-danger/5'
+                    : status === 'atMin'
+                    ? 'border-warning/30 bg-warning/5'
+                    : 'border-smc-border'
+                  const iconClass = status === 'belowMin'
+                    ? 'text-danger'
+                    : status === 'atMin'
+                    ? 'text-warning'
+                    : 'text-smc-muted'
+                  const valueClass = status === 'belowMin'
+                    ? 'text-danger'
+                    : status === 'atMin'
+                    ? 'text-warning'
+                    : 'text-success'
+                  return (
+                    <div key={part.id} className={`flex items-center gap-3 p-3 rounded-lg border ${rowClass}`}>
+                      <Package className={`w-4 h-4 flex-shrink-0 ${iconClass}`} />
+                      {editingId === part.id ? (
+                        <>
+                          <input className="input-field flex-1 text-sm py-1" value={editForm.name ?? ''} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))} />
+                          <input type="number" min={0} className="input-field w-20 text-sm py-1" value={editForm.stock ?? 0} onChange={e => setEditForm(f => ({ ...f, stock: Number(e.target.value) }))} />
+                          <span className="text-smc-muted text-xs">/</span>
+                          <input type="number" min={0} className="input-field w-20 text-sm py-1" value={editForm.minStock ?? 1} onChange={e => setEditForm(f => ({ ...f, minStock: Number(e.target.value) }))} />
+                          <button onClick={() => updateMutation.mutate({ id: part.id, data: editForm })} className="text-success hover:text-success/80"><Check className="w-4 h-4" /></button>
+                          <button onClick={() => setEditingId(null)} className="text-smc-muted hover:text-smc-text"><X className="w-4 h-4" /></button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="flex-1 text-sm text-smc-text">{part.name}</span>
+                          <span className={`text-sm font-semibold ${valueClass}`}>
+                            {part.stock} {part.unit}
+                          </span>
+                          <span className="text-xs text-smc-muted">mín. {part.minStock}</span>
+                          {status === 'belowMin' && <AlertTriangle className="w-3.5 h-3.5 text-danger" />}
+                          {status === 'atMin' && <AlertTriangle className="w-3.5 h-3.5 text-warning" />}
+                          <button onClick={() => startEdit(part)} className="text-smc-muted hover:text-smc-text ml-1"><Edit2 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => deleteMutation.mutate(part.id)} className="text-smc-muted hover:text-danger"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </CardContent>

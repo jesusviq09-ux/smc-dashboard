@@ -390,6 +390,7 @@ PilotRatingHistory.init({
 export class User extends Model {
   declare id: string; declare email: string; declare passwordHash: string
   declare name: string; declare department: string
+  declare role: string; declare permissions: string[]
 }
 User.init({
   id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
@@ -397,7 +398,27 @@ User.init({
   passwordHash: { type: DataTypes.STRING, allowNull: false },
   name: { type: DataTypes.STRING, allowNull: false },
   department: { type: DataTypes.STRING, allowNull: false, defaultValue: 'technical' },
+  role: { type: DataTypes.STRING, defaultValue: 'user' },
+  permissions: { type: DataTypes.ARRAY(DataTypes.STRING), defaultValue: [] },
 }, { sequelize, modelName: 'User', tableName: 'users', timestamps: true })
+
+// ============================================================
+// NOTICE
+// ============================================================
+export class Notice extends Model {
+  declare id: string; declare title: string; declare content: string
+  declare authorId: string; declare authorName: string
+  declare pinned: boolean; declare expiresAt?: string
+}
+Notice.init({
+  id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
+  title: { type: DataTypes.STRING, allowNull: false },
+  content: { type: DataTypes.TEXT, allowNull: false },
+  authorId: { type: DataTypes.STRING, defaultValue: '' },
+  authorName: { type: DataTypes.STRING, defaultValue: 'Admin' },
+  pinned: { type: DataTypes.BOOLEAN, defaultValue: false },
+  expiresAt: { type: DataTypes.DATE },
+}, { sequelize, modelName: 'Notice', tableName: 'notices', timestamps: true })
 
 export async function syncModels() {
   await sequelize.sync({ alter: true })

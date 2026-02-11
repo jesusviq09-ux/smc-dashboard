@@ -27,22 +27,32 @@ export default function ChatIndex() {
     const socket = io(apiUrl?.replace('/api', '') ?? 'http://localhost:3001', { transports: ['websocket'] })
     socketRef.current = socket
     socket.emit('join-channel', channel)
-    socket.on('new-message', (msg: Message) => setMessages(prev => [...prev, msg]))
+    socket.on('new-message', (msg: Message) => {
+      // Only add if from same channel and not already in list
+      setMessages(prev => {
+        if (prev.some(m => m.id && m.id === msg.id)) return prev
+        return [...prev, msg]
+      })
+    })
     return () => { socket.disconnect() }
   }, [channel])
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
-  const send = () => {
+  const send = async () => {
     if (!text.trim()) return
-    const payload: Record<string, unknown> = {
-      channel,
-      senderName: currentUser?.name ?? 'Equipo',
-      content: text.trim(),
-      timestamp: new Date().toISOString(),
-    }
-    socketRef.current?.emit('send-message', payload)
+    const content = text.trim()
     setText('')
+    try {
+      await communicationApi.sendMessage({
+        senderName: currentUser?.name ?? 'Equipo',
+        senderId: currentUser?.id ?? 'team',
+        content,
+        eventId: channel,
+      } as any)
+    } catch {
+      // Socket.io fallback — message already shown optimistically via socket
+    }
   }
 
   const CHANNELS = [

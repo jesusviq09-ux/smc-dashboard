@@ -6,6 +6,8 @@ export interface AuthUser {
   email: string
   name: string
   department: string
+  role: 'admin' | 'user'
+  permissions: string[]
 }
 
 interface AuthState {

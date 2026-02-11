@@ -13,110 +13,155 @@ function calcScore(ratings: Record<string, number>, weightKg: number): number {
 
 // GET /races
 router.get('/', async (_req: Request, res: Response) => {
-  const events = await RaceEvent.findAll({ order: [['date', 'DESC']] })
-  res.json(events)
+  try {
+    const events = await RaceEvent.findAll({ order: [['date', 'DESC']] })
+    res.json(events)
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
 })
 
 // GET /races/:id
 router.get('/:id', async (req: Request, res: Response) => {
-  const event = await RaceEvent.findByPk(req.params.id)
-  if (!event) return res.status(404).json({ error: 'Race not found' })
-  res.json(event)
+  try {
+    const event = await RaceEvent.findByPk(req.params.id)
+    if (!event) return res.status(404).json({ error: 'Race not found' })
+    res.json(event)
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
 })
 
 // POST /races
 router.post('/', async (req: Request, res: Response) => {
-  const event = await RaceEvent.create(req.body)
-  res.status(201).json(event)
+  try {
+    const event = await RaceEvent.create(req.body)
+    res.status(201).json(event)
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
 })
 
 // PUT /races/:id
 router.put('/:id', async (req: Request, res: Response) => {
-  const event = await RaceEvent.findByPk(req.params.id)
-  if (!event) return res.status(404).json({ error: 'Race not found' })
-  await event.update(req.body)
-  res.json(event)
+  try {
+    const event = await RaceEvent.findByPk(req.params.id)
+    if (!event) return res.status(404).json({ error: 'Race not found' })
+    await event.update(req.body)
+    res.json(event)
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
 })
 
 // DELETE /races/:id
 router.delete('/:id', async (req: Request, res: Response) => {
-  const event = await RaceEvent.findByPk(req.params.id)
-  if (!event) return res.status(404).json({ error: 'Race not found' })
-  await event.destroy()
-  res.status(204).send()
+  try {
+    const event = await RaceEvent.findByPk(req.params.id)
+    if (!event) return res.status(404).json({ error: 'Race not found' })
+    await event.destroy()
+    res.status(204).send()
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
 })
 
 // GET /races/:id/strategies
 router.get('/:id/strategies', async (req: Request, res: Response) => {
-  const strategies = await RaceStrategy.findAll({ where: { raceId: req.params.id } })
-  const withStints = await Promise.all(strategies.map(async (s) => {
-    const stints = await RaceStint.findAll({ where: { strategyId: s.id }, order: [['stintNumber', 'ASC']] })
-    return { ...s.toJSON(), stints }
-  }))
-  res.json(withStints)
+  try {
+    const strategies = await RaceStrategy.findAll({ where: { raceId: req.params.id } })
+    const withStints = await Promise.all(strategies.map(async (s) => {
+      const stints = await RaceStint.findAll({ where: { strategyId: s.id }, order: [['stintNumber', 'ASC']] })
+      return { ...s.toJSON(), stints }
+    }))
+    res.json(withStints)
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
 })
 
 // POST /races/:id/strategies
 router.post('/:id/strategies', async (req: Request, res: Response) => {
-  const { stints, ...strategyData } = req.body
-  const strategy = await RaceStrategy.create({ ...strategyData, raceId: req.params.id })
+  try {
+    const { stints, ...strategyData } = req.body
+    const strategy = await RaceStrategy.create({ ...strategyData, raceId: req.params.id })
 
-  if (stints && Array.isArray(stints)) {
-    await RaceStint.bulkCreate(stints.map((s: any) => ({ ...s, strategyId: strategy.id })))
+    if (stints && Array.isArray(stints)) {
+      await RaceStint.bulkCreate(stints.map((s: any) => ({ ...s, strategyId: strategy.id })))
+    }
+
+    const allStints = await RaceStint.findAll({ where: { strategyId: strategy.id }, order: [['stintNumber', 'ASC']] })
+    res.status(201).json({ ...strategy.toJSON(), stints: allStints })
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
   }
-
-  const allStints = await RaceStint.findAll({ where: { strategyId: strategy.id }, order: [['stintNumber', 'ASC']] })
-  res.status(201).json({ ...strategy.toJSON(), stints: allStints })
 })
 
 // PUT /races/strategies/:id
 router.put('/strategies/:id', async (req: Request, res: Response) => {
-  const strategy = await RaceStrategy.findByPk(req.params.id)
-  if (!strategy) return res.status(404).json({ error: 'Strategy not found' })
-  await strategy.update(req.body)
-  res.json(strategy)
+  try {
+    const strategy = await RaceStrategy.findByPk(req.params.id)
+    if (!strategy) return res.status(404).json({ error: 'Strategy not found' })
+    await strategy.update(req.body)
+    res.json(strategy)
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
 })
 
 // POST /races/:id/recommend
 router.post('/:id/recommend', async (req: Request, res: Response) => {
-  const { priorityMode, vehicleIds, category } = req.body
+  try {
+    const { vehicleIds, category } = req.body
 
-  const pilots = await Pilot.findAll({ where: { availability: true } })
-  const vehicles = await Vehicle.findAll({
-    where: vehicleIds ? { id: vehicleIds } : {},
-  })
-
-  const durationMinutes = category === 'F24+' ? 60 : 90
-  const minStints = 3
-
-  const recommendations = vehicles.map(vehicle => {
-    const eligible = pilots.filter(p => {
-      if (category === 'F24+' && p.age < 16) return false
-      if (vehicle.restrictions?.includes('karting_rivas')) return false
-      return true
+    const pilots = await Pilot.findAll({ where: { availability: true } })
+    const vehicles = await Vehicle.findAll({
+      where: vehicleIds ? { id: vehicleIds } : {},
     })
 
-    const scored = eligible.map(p => ({
-      id: p.id, fullName: p.fullName, weightKg: p.weightKg, age: p.age,
-      score: p.weightedScore,
-      affinityBonus: vehicle.id === 'smc02' ? Math.max(0, (70 - p.weightKg) / 10) * 0.15 : 0,
-    })).map(p => ({ ...p, totalScore: p.score + p.affinityBonus }))
-      .sort((a, b) => b.totalScore - a.totalScore)
+    const durationMinutes = category === 'F24+' ? 60 : 90
+    const minStints = 3
 
-    const stintDuration = Math.floor(durationMinutes / minStints)
-    const stints = scored.slice(0, minStints).map((pilot, i) => ({
-      stintNumber: i + 1,
-      pilotId: pilot.id,
-      pilotName: pilot.fullName,
-      plannedDurationMinutes: stintDuration,
-      objective: i === 0 ? 'CONSERVATIVE' : i === minStints - 1 ? 'AGGRESSIVE' : 'BALANCED',
-      justification: `Puntuación: ${pilot.totalScore.toFixed(1)}/10${pilot.affinityBonus > 0 ? ` · Bonificación peso +${pilot.affinityBonus.toFixed(2)}` : ''}`,
-    }))
+    const recommendations = vehicles.map(vehicle => {
+      const eligible = pilots.filter(p => {
+        if (category === 'F24+' && p.age < 16) return false
+        if (vehicle.restrictions?.includes('karting_rivas')) return false
+        return true
+      })
 
-    return { vehicleId: vehicle.id, vehicleName: vehicle.name, stints }
-  })
+      const scored = eligible.map(p => ({
+        id: p.id, fullName: p.fullName, weightKg: p.weightKg, age: p.age,
+        score: p.weightedScore,
+        affinityBonus: vehicle.id === 'smc02' ? Math.max(0, (70 - p.weightKg) / 10) * 0.15 : 0,
+      })).map(p => ({ ...p, totalScore: p.score + p.affinityBonus }))
+        .sort((a, b) => b.totalScore - a.totalScore)
 
-  res.json({ recommendations, warnings: [] })
+      const stintDuration = Math.floor(durationMinutes / minStints)
+      const stints = scored.slice(0, minStints).map((pilot, i) => ({
+        stintNumber: i + 1,
+        pilotId: pilot.id,
+        pilotName: pilot.fullName,
+        plannedDurationMinutes: stintDuration,
+        objective: i === 0 ? 'CONSERVATIVE' : i === minStints - 1 ? 'AGGRESSIVE' : 'BALANCED',
+        justification: `Puntuación: ${pilot.totalScore.toFixed(1)}/10${pilot.affinityBonus > 0 ? ` · Bonificación peso +${pilot.affinityBonus.toFixed(2)}` : ''}`,
+      }))
+
+      return { vehicleId: vehicle.id, vehicleName: vehicle.name, stints }
+    })
+
+    res.json({ recommendations, warnings: [] })
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
 })
 
 export default router

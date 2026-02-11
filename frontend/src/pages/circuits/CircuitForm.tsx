@@ -42,7 +42,7 @@ export default function CircuitForm() {
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const value = ['lengthMeters', 'numberOfCurves', 'elevationMeters', 'sectors'].includes(field)
-      ? Number(e.target.value)
+      ? parseFloat(e.target.value) || 0
       : e.target.value
     setForm(f => ({ ...f, [field]: value }))
   }
@@ -111,7 +111,7 @@ export default function CircuitForm() {
               </div>
               <div>
                 <label className="form-label">Elevación (m)</label>
-                <input type="number" className="input-field" value={form.elevationMeters} onChange={set('elevationMeters')} min={0} max={1000} />
+                <input type="number" className="input-field" value={form.elevationMeters} onChange={set('elevationMeters')} min={0} max={1000} step="0.1" />
               </div>
               <div>
                 <label className="form-label">Tipo de asfalto</label>

@@ -2,9 +2,10 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Dumbbell, Trophy, Wrench,
   Activity, Map, MessageSquare, BarChart3, Target,
-  Download, X, Zap, ChevronRight
+  Download, X, Zap, ChevronRight, ShieldCheck
 } from 'lucide-react'
 import { useMaintenanceAlerts } from '@/hooks/useMaintenanceAlerts'
+import { getStoredUser } from '@/hooks/useAuth'
 
 interface SidebarProps {
   onClose?: () => void
@@ -27,6 +28,8 @@ const navItems = [
 export default function Sidebar({ onClose }: SidebarProps) {
   const location = useLocation()
   const { alertCount } = useMaintenanceAlerts()
+  const currentUser = getStoredUser()
+  const isAdmin = currentUser?.role === 'admin'
 
   return (
     <div className="flex flex-col h-full bg-smc-darker border-r border-smc-border">
@@ -84,6 +87,27 @@ export default function Sidebar({ onClose }: SidebarProps) {
           )
         })}
       </nav>
+
+      {/* Admin link */}
+      {isAdmin && (
+        <div className="px-3 pb-2">
+          <NavLink
+            to="/admin/users"
+            onClick={onClose}
+            className={({ isActive }) => `
+              group flex items-center gap-3 px-3 py-2.5 rounded-lg
+              text-sm font-medium transition-all duration-150
+              ${isActive
+                ? 'bg-primary/10 text-primary border border-primary/20'
+                : 'text-smc-muted hover:text-smc-text hover:bg-smc-card'
+              }
+            `}
+          >
+            <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+            <span>Administración</span>
+          </NavLink>
+        </div>
+      )}
 
       {/* Vehicles Status Footer */}
       <div className="px-4 py-4 border-t border-smc-border">

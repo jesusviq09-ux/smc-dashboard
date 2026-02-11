@@ -34,6 +34,7 @@ const DebriefForm = lazy(() => import('@/pages/communication/DebriefForm'))
 const StatsIndex = lazy(() => import('@/pages/statistics/StatsIndex'))
 const GoalsIndex = lazy(() => import('@/pages/goals/GoalsIndex'))
 const ExportsIndex = lazy(() => import('@/pages/exports/ExportsIndex'))
+const AdminUsers = lazy(() => import('@/pages/admin/AdminUsers'))
 
 // Auth guard: redirects to /login if not authenticated
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -103,6 +104,9 @@ export default function App() {
 
                 {/* Exports */}
                 <Route path="/exports" element={<ExportsIndex />} />
+
+                {/* Admin */}
+                <Route path="/admin/users" element={<AdminUsers />} />
 
                 {/* 404 */}
                 <Route path="*" element={<Navigate to="/dashboard" replace />} />

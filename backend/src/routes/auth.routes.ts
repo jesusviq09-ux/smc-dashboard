@@ -5,6 +5,18 @@ import { User } from '../models/index'
 
 const router = Router()
 const JWT_SECRET = process.env.JWT_SECRET || 'smc-dashboard-secret-change-in-prod'
+const ADMIN_EMAIL = 'smcgreenpower@gmail.com'
+
+function buildUserPayload(user: User) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    department: user.department,
+    role: user.role || 'user',
+    permissions: user.permissions || [],
+  }
+}
 
 // POST /api/auth/register
 router.post('/register', async (req: Request, res: Response) => {
@@ -18,9 +30,12 @@ router.post('/register', async (req: Request, res: Response) => {
       return res.status(409).json({ error: 'Ya existe una cuenta con ese email' })
     }
     const passwordHash = await bcrypt.hash(password, 10)
-    const user = await User.create({ email, passwordHash, name, department } as any)
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, department: user.department }, JWT_SECRET, { expiresIn: '30d' })
-    res.status(201).json({ token, user: { id: user.id, email: user.email, name: user.name, department: user.department } })
+    // Force admin role for the designated admin email
+    const role = email.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'user'
+    const user = await User.create({ email, passwordHash, name, department, role, permissions: [] } as any)
+    const payload = buildUserPayload(user)
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' })
+    res.status(201).json({ token, user: payload })
   } catch (err: any) {
     console.error('Register error:', err)
     res.status(500).json({ error: err.message || 'Error al registrar' })
@@ -42,8 +57,13 @@ router.post('/login', async (req: Request, res: Response) => {
     if (!valid) {
       return res.status(401).json({ error: 'Email o contraseña incorrectos' })
     }
-    const token = jwt.sign({ id: user.id, email: user.email, name: user.name, department: user.department }, JWT_SECRET, { expiresIn: '30d' })
-    res.json({ token, user: { id: user.id, email: user.email, name: user.name, department: user.department } })
+    // Ensure admin email always has admin role (even if created before this change)
+    if (user.email.toLowerCase() === ADMIN_EMAIL && user.role !== 'admin') {
+      await user.update({ role: 'admin' })
+    }
+    const payload = buildUserPayload(user)
+    const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '30d' })
+    res.json({ token, user: payload })
   } catch (err: any) {
     console.error('Login error:', err)
     res.status(500).json({ error: err.message || 'Error al iniciar sesión' })
@@ -57,7 +77,16 @@ router.get('/me', (req: Request, res: Response) => {
     if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'No autenticado' })
     const token = authHeader.slice(7)
     const decoded = jwt.verify(token, JWT_SECRET) as any
-    res.json({ user: { id: decoded.id, email: decoded.email, name: decoded.name, department: decoded.department } })
+    res.json({
+      user: {
+        id: decoded.id,
+        email: decoded.email,
+        name: decoded.name,
+        department: decoded.department,
+        role: decoded.role || 'user',
+        permissions: decoded.permissions || [],
+      },
+    })
   } catch {
     res.status(401).json({ error: 'Token inválido o expirado' })
   }
