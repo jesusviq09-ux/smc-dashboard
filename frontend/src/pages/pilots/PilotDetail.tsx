@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { Edit2, Trash2, Plus, ChevronLeft, Star } from 'lucide-react'
+import { Edit2, Trash2, Plus, ChevronLeft, TrendingUp } from 'lucide-react'
 import { useState } from 'react'
 import {
   RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer,
@@ -10,18 +10,43 @@ import { pilotsApi } from '@/services/api/pilots.api'
 import { Card, CardContent } from '@/components/ui/Card'
 import ScoreRing from '@/components/ui/ScoreRing'
 import Modal from '@/components/ui/Modal'
-import { RATING_LABELS, RATING_WEIGHTS, getScoreColor } from '@/utils/pilotScore'
+import { RATING_LABELS, RATING_WEIGHTS, getScoreColor, calculateWeightedScore } from '@/utils/pilotScore'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { PilotRatings } from '@/types'
+
+const RATING_KEYS = ['experience', 'driving', 'energyManagement', 'teamwork', 'consistency', 'adaptation'] as const
+const LINE_COLORS: Record<string, string> = {
+  General: '#00d4ff',
+  Experiencia: '#3fb950',
+  Pilotaje: '#f78166',
+  Energía: '#d29922',
+  'Trabajo eq.': '#a855f7',
+  Consistencia: '#ec4899',
+  Adaptación: '#fb923c',
+}
 
 export default function PilotDetail() {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
+
+  // Notes modal state
   const [noteModal, setNoteModal] = useState(false)
   const [noteContent, setNoteContent] = useState('')
   const [noteAuthor, setNoteAuthor] = useState('')
+
+  // Evolution modal state
+  const [evolutionModal, setEvolutionModal] = useState(false)
+  const [evoDate, setEvoDate] = useState(new Date().toISOString().split('T')[0])
+  const [evoNotes, setEvoNotes] = useState('')
+  const [evoRatings, setEvoRatings] = useState<PilotRatings>({
+    experience: 5, driving: 5, energyManagement: 5,
+    teamwork: 5, consistency: 5, adaptation: 5,
+  })
+
+  // Chart view toggle
+  const [chartLines, setChartLines] = useState<string[]>(['General'])
 
   const { data: pilot, isLoading } = useQuery({
     queryKey: ['pilot', id],
@@ -63,8 +88,35 @@ export default function PilotDetail() {
     },
   })
 
+  // Save evolution snapshot via PUT /pilots/:id (triggers rating history snapshot in backend)
+  const saveEvolutionMutation = useMutation({
+    mutationFn: () => pilotsApi.update(id!, {
+      ratings: evoRatings,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['pilot', id] })
+      queryClient.invalidateQueries({ queryKey: ['pilot-history', id] })
+      setEvolutionModal(false)
+      setEvoNotes('')
+    },
+  })
+
   if (isLoading) return <div className="skeleton h-96 rounded-xl" />
   if (!pilot) return <p className="text-smc-muted">Piloto no encontrado</p>
+
+  // Pre-fill evo ratings from current pilot when opening modal
+  const openEvoModal = () => {
+    setEvoRatings({
+      experience: pilot.ratings.experience,
+      driving: pilot.ratings.driving,
+      energyManagement: pilot.ratings.energyManagement,
+      teamwork: pilot.ratings.teamwork,
+      consistency: pilot.ratings.consistency,
+      adaptation: pilot.ratings.adaptation,
+    })
+    setEvoDate(new Date().toISOString().split('T')[0])
+    setEvolutionModal(true)
+  }
 
   // Radar chart data
   const radarData = (Object.entries(pilot.ratings) as [keyof PilotRatings, number][]).map(([key, value]) => ({
@@ -74,18 +126,34 @@ export default function PilotDetail() {
     fullMark: 10,
   }))
 
-  // History line chart data
+  // History line chart data — all metrics
   const historyChartData = history
     .sort((a, b) => new Date(a.sessionDate).getTime() - new Date(b.sessionDate).getTime())
-    .slice(-10)
     .map(h => ({
-      date: format(new Date(h.sessionDate), 'd MMM', { locale: es }),
-      General: h.weightedScore,
+      date: format(new Date(h.sessionDate), 'd MMM yy', { locale: es }),
+      General: +(h.weightedScore ?? 0).toFixed(2),
+      Experiencia: h.ratings.experience,
       Pilotaje: h.ratings.driving,
-      Energía: h.ratings.energyManagement,
+      'Energía': h.ratings.energyManagement,
+      'Trabajo eq.': h.ratings.teamwork,
+      Consistencia: h.ratings.consistency,
+      Adaptación: h.ratings.adaptation,
     }))
 
+  const ALL_LINES = ['General', 'Experiencia', 'Pilotaje', 'Energía', 'Trabajo eq.', 'Consistencia', 'Adaptación']
+
+  const toggleLine = (line: string) => {
+    setChartLines(prev =>
+      prev.includes(line)
+        ? prev.length > 1 ? prev.filter(l => l !== line) : prev
+        : [...prev, line]
+    )
+  }
+
   const categories = pilot.age < 16 ? ['F24'] : ['F24', 'F24+']
+
+  // Preview score in evo modal
+  const evoScore = calculateWeightedScore(evoRatings, pilot.weightKg)
 
   return (
     <div className="space-y-6">
@@ -100,14 +168,15 @@ export default function PilotDetail() {
             DNI: {pilot.dni} · Desde {format(new Date(pilot.joinDate), "MMMM yyyy", { locale: es })}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap justify-end">
+          <button onClick={openEvoModal} className="btn-primary flex items-center gap-2">
+            <TrendingUp className="w-4 h-4" /> Registrar evolución
+          </button>
           <Link to={`/pilots/${id}/edit`} className="btn-secondary flex items-center gap-2">
             <Edit2 className="w-4 h-4" /> Editar
           </Link>
           <button
-            onClick={() => {
-              if (confirm('¿Eliminar este piloto?')) deleteMutation.mutate()
-            }}
+            onClick={() => { if (confirm('¿Eliminar este piloto?')) deleteMutation.mutate() }}
             className="btn-danger flex items-center gap-2"
           >
             <Trash2 className="w-4 h-4" />
@@ -124,7 +193,7 @@ export default function PilotDetail() {
               {pilot.fullName.charAt(0).toUpperCase()}
             </div>
             <h2 className="text-xl font-bold text-white">{pilot.fullName}</h2>
-            <div className="flex gap-2 mt-2">
+            <div className="flex gap-2 mt-2 flex-wrap justify-center">
               {categories.map(cat => (
                 <span key={cat} className="badge-blue">{cat}</span>
               ))}
@@ -151,6 +220,10 @@ export default function PilotDetail() {
             <div className="mt-6">
               <ScoreRing score={pilot.weightedScore ?? 0} size={90} strokeWidth={7} label="Puntuación general" />
             </div>
+
+            {history.length > 0 && (
+              <p className="text-xs text-smc-muted mt-3">{history.length} registro{history.length !== 1 ? 's' : ''} de evolución</p>
+            )}
           </CardContent>
         </Card>
 
@@ -200,24 +273,62 @@ export default function PilotDetail() {
       </div>
 
       {/* Evolution chart */}
-      {historyChartData.length > 0 && (
-        <Card title="Evolución de valoraciones">
+      {historyChartData.length > 0 ? (
+        <Card title={`Evolución de valoraciones (${historyChartData.length} registros)`}>
           <CardContent>
-            <ResponsiveContainer width="100%" height={220}>
+            {/* Line toggles */}
+            <div className="flex flex-wrap gap-1.5 mb-4">
+              {ALL_LINES.map(line => (
+                <button
+                  key={line}
+                  onClick={() => toggleLine(line)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    chartLines.includes(line)
+                      ? 'border-transparent text-smc-dark'
+                      : 'border-smc-border text-smc-muted hover:text-smc-text'
+                  }`}
+                  style={chartLines.includes(line) ? { backgroundColor: LINE_COLORS[line] } : {}}
+                >
+                  {line}
+                </button>
+              ))}
+            </div>
+
+            <ResponsiveContainer width="100%" height={260}>
               <LineChart data={historyChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
-                <XAxis dataKey="date" tick={{ fill: "#8b949e", fontSize: 11 }} />
+                <XAxis dataKey="date" tick={{ fill: "#8b949e", fontSize: 10 }} />
                 <YAxis domain={[0, 10]} tick={{ fill: "#8b949e", fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '8px' }}
                   labelStyle={{ color: '#c9d1d9' }}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="General" stroke="#00d4ff" strokeWidth={2} dot={{ fill: "#00d4ff", r: 3 }} />
-                <Line type="monotone" dataKey="Pilotaje" stroke="#3fb950" strokeWidth={2} dot={{ fill: "#3fb950", r: 3 }} />
-                <Line type="monotone" dataKey="Energía" stroke="#d29922" strokeWidth={2} dot={{ fill: "#d29922", r: 3 }} />
+                {ALL_LINES.filter(l => chartLines.includes(l)).map(line => (
+                  <Line
+                    key={line}
+                    type="monotone"
+                    dataKey={line}
+                    stroke={LINE_COLORS[line]}
+                    strokeWidth={line === 'General' ? 2.5 : 1.5}
+                    dot={{ fill: LINE_COLORS[line], r: 3 }}
+                    activeDot={{ r: 5 }}
+                  />
+                ))}
               </LineChart>
             </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card title="Evolución de valoraciones">
+          <CardContent>
+            <div className="flex flex-col items-center justify-center py-10 text-smc-muted">
+              <TrendingUp className="w-10 h-10 mb-3 opacity-30" />
+              <p className="text-sm">Aún no hay registros de evolución.</p>
+              <button onClick={openEvoModal} className="btn-primary mt-4 flex items-center gap-2 text-sm">
+                <Plus className="w-4 h-4" /> Registrar primera evolución
+              </button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -286,6 +397,77 @@ export default function PilotDetail() {
               placeholder="Nombre del entrenador..."
               value={noteAuthor}
               onChange={e => setNoteAuthor(e.target.value)}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Evolution Modal */}
+      <Modal
+        isOpen={evolutionModal}
+        onClose={() => setEvolutionModal(false)}
+        title="Registrar evolución del piloto"
+        footer={
+          <>
+            <button onClick={() => setEvolutionModal(false)} className="btn-secondary">Cancelar</button>
+            <button
+              onClick={() => saveEvolutionMutation.mutate()}
+              disabled={saveEvolutionMutation.isPending}
+              className="btn-primary flex items-center gap-2"
+            >
+              <TrendingUp className="w-4 h-4" />
+              {saveEvolutionMutation.isPending ? 'Guardando...' : 'Guardar evolución'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <label className="label">Fecha del registro</label>
+              <input
+                type="date"
+                className="input-field"
+                value={evoDate}
+                onChange={e => setEvoDate(e.target.value)}
+              />
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-smc-muted mb-1">Puntuación calculada</p>
+              <ScoreRing score={evoScore} size={64} strokeWidth={5} />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {RATING_KEYS.map(key => (
+              <div key={key}>
+                <div className="flex justify-between mb-1">
+                  <label className="text-sm text-smc-text">
+                    {RATING_LABELS[key]} <span className="text-xs text-smc-muted">({Math.round(RATING_WEIGHTS[key] * 100)}%)</span>
+                  </label>
+                  <span className="text-sm font-semibold text-primary">{evoRatings[key]}</span>
+                </div>
+                <input
+                  type="range" min={1} max={10} step={1}
+                  value={evoRatings[key]}
+                  onChange={e => setEvoRatings(r => ({ ...r, [key]: Number(e.target.value) }))}
+                  className="w-full accent-primary"
+                />
+                <div className="flex justify-between text-xs text-smc-muted mt-0.5">
+                  <span>1</span><span>10</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div>
+            <label className="label">Notas de la sesión (opcional)</label>
+            <textarea
+              className="input-field resize-none"
+              rows={2}
+              placeholder="Contexto de la valoración: entrenamiento, carrera..."
+              value={evoNotes}
+              onChange={e => setEvoNotes(e.target.value)}
             />
           </div>
         </div>
