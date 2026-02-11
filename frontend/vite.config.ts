@@ -29,9 +29,10 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         runtimeCaching: [
           {
-            // Usar función por pathname para que funcione en cualquier entorno
-            // (localhost en desarrollo, Railway en producción)
-            urlPattern: ({ url }: { url: URL }) => url.pathname.startsWith('/api/'),
+            // Only cache same-origin /api/ calls (local proxy in dev)
+            // External Railway API calls must NOT be intercepted by the SW
+            urlPattern: ({ url, sameOrigin }: { url: URL; sameOrigin: boolean }) =>
+              sameOrigin && url.pathname.startsWith('/api/'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'api-cache',

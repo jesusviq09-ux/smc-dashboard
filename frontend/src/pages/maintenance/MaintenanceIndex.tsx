@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Plus, Wrench, AlertTriangle, CheckCircle, Clock } from 'lucide-react'
+import { Plus, Wrench, AlertTriangle, CheckCircle, Clock, ClipboardCheck } from 'lucide-react'
 import { useState } from 'react'
 import { maintenanceApi } from '@/services/api/maintenance.api'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -9,7 +9,49 @@ import { db } from '@/services/indexeddb/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { MaintenanceType } from '@/types'
+import { MaintenanceType, Vehicle } from '@/types'
+
+function ChecklistHistory({ vehicles }: { vehicles: Vehicle[] }) {
+  const checklists = useLiveQuery(
+    () => db.maintenanceChecklists.orderBy('date').reverse().toArray(),
+    []
+  )
+
+  if (!checklists || checklists.length === 0) return null
+
+  return (
+    <Card title="Checklists firmados">
+      <CardContent className="pt-3">
+        <div className="space-y-2">
+          {checklists.map(cl => {
+            const vehicleName = vehicles.find(v => v.id === cl.vehicleId)?.name ?? cl.vehicleId
+            const checkedCount = cl.items.filter(i => i.checked).length
+            const totalCount = cl.items.length
+            return (
+              <div key={cl.id} className="flex items-start gap-3 p-3 rounded-lg border border-smc-border bg-smc-darker">
+                <ClipboardCheck className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-medium text-white text-sm">{vehicleName}</span>
+                    <span className="badge-blue text-xs">{cl.type === 'pre_race' ? 'Pre-carrera' : 'Post-carrera'}</span>
+                    <span className="badge-green text-xs">{checkedCount}/{totalCount} ítems</span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1 text-xs text-smc-muted flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      {format(new Date(cl.date), "d MMM yyyy", { locale: es })}
+                    </span>
+                    {cl.signedBy && <span>Firmado: {cl.signedBy}</span>}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
 
 const TYPES: { value: MaintenanceType; label: string }[] = [
   { value: 'preventive', label: 'Preventivo' },
@@ -170,6 +212,9 @@ export default function MaintenanceIndex() {
           )}
         </CardContent>
       </Card>
+
+      {/* Signed Checklists from IndexedDB */}
+      <ChecklistHistory vehicles={vehicles ?? []} />
 
       {/* Create Modal */}
       <Modal
