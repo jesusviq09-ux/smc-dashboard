@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useParams, Link } from 'react-router-dom'
-import { ChevronLeft, Plus, Activity, Clock, Zap, Thermometer } from 'lucide-react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ChevronLeft, Plus, Activity, Clock, Zap, Thermometer, Pencil, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { trainingApi } from '@/services/api/training.api'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -13,7 +13,11 @@ import { es } from 'date-fns/locale'
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [stintModal, setStintModal] = useState(false)
+  const [editModal, setEditModal] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [editForm, setEditForm] = useState({ date: '', locationId: '', vehicleId: '', durationMinutes: 0, notes: '' })
   const [lapInput, setLapInput] = useState('')
   const [telemetry, setTelemetry] = useState({
     voltageInitial: '', voltageFinal: '', currentAvg: '',
@@ -42,6 +46,41 @@ export default function SessionDetail() {
     mutationFn: () => trainingApi.updateSession(id!, { status: 'completed' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['training-session', id] }),
   })
+
+  const editMutation = useMutation({
+    mutationFn: () => trainingApi.updateSession(id!, {
+      date: editForm.date,
+      locationId: editForm.locationId,
+      vehicleId: editForm.vehicleId as 'smc01' | 'smc02',
+      durationMinutes: Number(editForm.durationMinutes),
+      notes: editForm.notes,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['training-session', id] })
+      queryClient.invalidateQueries({ queryKey: ['training-sessions'] })
+      setEditModal(false)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => trainingApi.deleteSession(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['training-sessions'] })
+      navigate('/training')
+    },
+  })
+
+  const openEdit = () => {
+    if (!session) return
+    setEditForm({
+      date: session.date?.slice(0, 10) ?? '',
+      locationId: session.locationId ?? '',
+      vehicleId: session.vehicleId ?? 'smc01',
+      durationMinutes: session.durationMinutes ?? 0,
+      notes: (session as any).notes ?? '',
+    })
+    setEditModal(true)
+  }
 
   if (isLoading) return <div className="skeleton h-96 rounded-xl" />
   if (!session) return <p className="text-smc-muted">Sesión no encontrada</p>
@@ -90,11 +129,19 @@ export default function SessionDetail() {
           </h1>
           <p className="text-smc-muted text-sm">{session.locationId} · {session.durationMinutes} min</p>
         </div>
-        {session.status !== 'completed' && (
-          <button onClick={() => completeMutation.mutate()} className="btn-primary">
-            Marcar completada
+        <div className="flex gap-2">
+          {session.status !== 'completed' && (
+            <button onClick={() => completeMutation.mutate()} className="btn-primary">
+              Marcar completada
+            </button>
+          )}
+          <button onClick={openEdit} className="btn-secondary flex items-center gap-2">
+            <Pencil className="w-4 h-4" /> Editar
           </button>
-        )}
+          <button onClick={() => setDeleteConfirm(true)} className="btn-danger flex items-center gap-2">
+            <Trash2 className="w-4 h-4" /> Eliminar
+          </button>
+        </div>
       </div>
 
       {/* Stats overview */}
@@ -215,6 +262,70 @@ export default function SessionDetail() {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit session modal */}
+      {editModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card rounded-xl p-6 max-w-md w-full space-y-4 border border-smc-border">
+            <h3 className="font-semibold text-smc-text">Editar sesión</h3>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="label">Fecha</label>
+                <input type="date" className="input-field" value={editForm.date}
+                  onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Circuito / Ubicación</label>
+                <input type="text" className="input-field" value={editForm.locationId}
+                  onChange={e => setEditForm(f => ({ ...f, locationId: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Vehículo</label>
+                <select className="input-field" value={editForm.vehicleId}
+                  onChange={e => setEditForm(f => ({ ...f, vehicleId: e.target.value }))}>
+                  <option value="smc01">SMC 01</option>
+                  <option value="smc02">SMC 02 EVO</option>
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="label">Duración (minutos)</label>
+                <input type="number" className="input-field" value={editForm.durationMinutes}
+                  onChange={e => setEditForm(f => ({ ...f, durationMinutes: +e.target.value }))} />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Notas</label>
+                <textarea className="input-field resize-none" rows={2} value={editForm.notes}
+                  onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditModal(false)} className="btn-secondary">Cancelar</button>
+              <button onClick={() => editMutation.mutate()} disabled={editMutation.isPending} className="btn-primary">
+                {editMutation.isPending ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card rounded-xl p-6 max-w-sm w-full space-y-4 border border-smc-border">
+            <h3 className="font-semibold text-smc-text">¿Eliminar sesión?</h3>
+            <p className="text-sm text-smc-muted">Se eliminarán esta sesión y todos sus stints. Esta acción no se puede deshacer.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteConfirm(false)} className="btn-secondary">Cancelar</button>
+              <button onClick={() => deleteMutation.mutate()} disabled={deleteMutation.isPending} className="btn-danger flex items-center gap-2">
+                <Trash2 className="w-4 h-4" />
+                {deleteMutation.isPending ? 'Eliminando...' : 'Eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add Stint Modal */}
       <Modal
