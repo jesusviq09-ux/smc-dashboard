@@ -70,23 +70,42 @@ router.post('/login', async (req: Request, res: Response) => {
   }
 })
 
-// GET /api/auth/me — verify token
-router.get('/me', (req: Request, res: Response) => {
+// PUT /api/auth/profile — update own name and department
+router.put('/profile', async (req: Request, res: Response) => {
   try {
     const authHeader = req.headers.authorization
     if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'No autenticado' })
     const token = authHeader.slice(7)
     const decoded = jwt.verify(token, JWT_SECRET) as any
-    res.json({
-      user: {
-        id: decoded.id,
-        email: decoded.email,
-        name: decoded.name,
-        department: decoded.department,
-        role: decoded.role || 'user',
-        permissions: decoded.permissions || [],
-      },
+    const user = await User.findByPk(decoded.id)
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
+    const { name, department } = req.body
+    await user.update({
+      ...(name?.trim() ? { name: name.trim() } : {}),
+      ...(department?.trim() ? { department: department.trim() } : {}),
     })
+    res.json({ user: buildUserPayload(user) })
+  } catch (err: any) {
+    console.error('PUT /auth/profile error:', err)
+    res.status(500).json({ error: err.message || 'Error al actualizar perfil' })
+  }
+})
+
+// GET /api/auth/me — verify token and return fresh user data from DB (including latest permissions)
+router.get('/me', async (req: Request, res: Response) => {
+  try {
+    const authHeader = req.headers.authorization
+    if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'No autenticado' })
+    const token = authHeader.slice(7)
+    const decoded = jwt.verify(token, JWT_SECRET) as any
+    // Fetch fresh data from DB to get up-to-date permissions
+    const user = await User.findByPk(decoded.id)
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
+    // Ensure admin email always has admin role
+    if (user.email.toLowerCase() === ADMIN_EMAIL && user.role !== 'admin') {
+      await user.update({ role: 'admin' })
+    }
+    res.json({ user: buildUserPayload(user) })
   } catch {
     res.status(401).json({ error: 'Token inválido o expirado' })
   }

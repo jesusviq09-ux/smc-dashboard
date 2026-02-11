@@ -1,7 +1,7 @@
-import { Menu, Wifi, WifiOff, Bell, RefreshCw, LogOut } from 'lucide-react'
+import { Menu, Wifi, WifiOff, Bell, RefreshCw, LogOut, UserCog } from 'lucide-react'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
 import { useSyncStore } from '@/store/syncStore'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { getStoredUser } from '@/hooks/useAuth'
 
 const pageTitles: Record<string, string> = {
@@ -84,10 +84,17 @@ export default function TopBar({ onMenuClick }: TopBarProps) {
         {/* User + Logout */}
         {currentUser && (
           <div className="flex items-center gap-2 pl-2 border-l border-smc-border">
-            <div className="hidden sm:flex flex-col items-end">
-              <span className="text-xs font-medium text-white">{currentUser.name}</span>
-              <span className="text-xs text-smc-muted capitalize">{currentUser.department}</span>
-            </div>
+            <Link
+              to="/profile"
+              className="hidden sm:flex items-center gap-1.5 hover:opacity-80 transition-opacity group"
+              title="Editar perfil"
+            >
+              <div className="flex flex-col items-end">
+                <span className="text-xs font-medium text-white group-hover:text-primary transition-colors">{currentUser.name}</span>
+                <span className="text-xs text-smc-muted capitalize">{currentUser.department}</span>
+              </div>
+              <UserCog className="w-3.5 h-3.5 text-smc-muted group-hover:text-primary transition-colors" />
+            </Link>
             <button onClick={handleLogout} className="p-2 rounded-lg hover:bg-smc-card text-smc-muted hover:text-danger" title="Cerrar sesión">
               <LogOut className="w-4 h-4" />
             </button>

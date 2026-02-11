@@ -182,7 +182,7 @@ export class RaceEvent extends Model {
 RaceEvent.init({
   id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
   name: { type: DataTypes.STRING, allowNull: false },
-  circuitId: { type: DataTypes.UUID },
+  circuitId: { type: DataTypes.STRING },
   date: { type: DataTypes.DATE, allowNull: false },
   categories: { type: DataTypes.ARRAY(DataTypes.STRING), defaultValue: [] },
   weatherConditions: DataTypes.STRING,
