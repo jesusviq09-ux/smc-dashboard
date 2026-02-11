@@ -19,6 +19,9 @@ import authRouter from './routes/auth.routes'
 
 const app = express()
 
+// Trust Railway/Vercel proxy (needed for express-rate-limit and correct IP detection)
+app.set('trust proxy', 1)
+
 // Security
 // CORS_ORIGIN se configura como variable de entorno en Railway/producción
 // En desarrollo local permite cualquier origen ('*')
