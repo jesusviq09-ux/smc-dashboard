@@ -24,15 +24,22 @@ export default function NoticeBoard() {
   const [editNotice, setEditNotice] = useState<Notice | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [form, setForm] = useState({ title: '', content: '', pinned: false, expiresAt: '' })
+  const [formError, setFormError] = useState<string | null>(null)
 
   const createMutation = useMutation({
     mutationFn: noticesApi.create,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notices'] }); setShowForm(false); resetForm() },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notices'] }); setShowForm(false); resetForm(); setFormError(null) },
+    onError: (err: any) => {
+      setFormError(err?.response?.data?.error || 'Error al publicar el aviso. Inténtalo de nuevo.')
+    },
   })
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Notice> }) => noticesApi.update(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notices'] }); setEditNotice(null) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['notices'] }); setEditNotice(null); setFormError(null) },
+    onError: (err: any) => {
+      setFormError(err?.response?.data?.error || 'Error al actualizar el aviso. Inténtalo de nuevo.')
+    },
   })
 
   const deleteMutation = useMutation({
@@ -40,10 +47,11 @@ export default function NoticeBoard() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['notices'] }); setDeleteConfirm(null) },
   })
 
-  const resetForm = () => setForm({ title: '', content: '', pinned: false, expiresAt: '' })
+  const resetForm = () => { setForm({ title: '', content: '', pinned: false, expiresAt: '' }); setFormError(null) }
 
   const openEdit = (n: Notice) => {
     setEditNotice(n)
+    setFormError(null)
     setForm({ title: n.title, content: n.content, pinned: n.pinned, expiresAt: n.expiresAt?.slice(0, 10) ?? '' })
   }
 
@@ -89,12 +97,18 @@ export default function NoticeBoard() {
               <input type="date" className="input-field py-1 text-sm" value={form.expiresAt} onChange={e => setForm(f => ({ ...f, expiresAt: e.target.value }))} />
             </div>
           </div>
+          {formError && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              {formError}
+            </div>
+          )}
           <div className="flex gap-2 justify-end">
             <button onClick={() => { setShowForm(false); setEditNotice(null); resetForm() }} className="btn-secondary text-sm py-1.5">Cancelar</button>
             <button
               className="btn-primary text-sm flex items-center gap-1.5 py-1.5"
-              disabled={!form.title.trim() || !form.content.trim()}
+              disabled={!form.title.trim() || !form.content.trim() || createMutation.isPending || updateMutation.isPending}
               onClick={() => {
+                setFormError(null)
                 const payload = { ...form, expiresAt: form.expiresAt || undefined }
                 if (editNotice) {
                   updateMutation.mutate({ id: editNotice.id, data: payload })
@@ -104,7 +118,7 @@ export default function NoticeBoard() {
               }}
             >
               <Save className="w-3.5 h-3.5" />
-              {editNotice ? 'Actualizar' : 'Publicar'}
+              {(createMutation.isPending || updateMutation.isPending) ? 'Guardando...' : (editNotice ? 'Actualizar' : 'Publicar')}
             </button>
           </div>
         </div>

@@ -4,22 +4,32 @@ import { Message } from '../models/index'
 const router = Router()
 
 router.get('/', async (req: Request, res: Response) => {
-  const where = req.query.eventId ? { eventId: req.query.eventId } : {}
-  const messages = await Message.findAll({ where, order: [['createdAt', 'ASC']], limit: 200 })
-  res.json(messages)
+  try {
+    const where = req.query.eventId ? { eventId: req.query.eventId } : {}
+    const messages = await Message.findAll({ where, order: [['createdAt', 'ASC']], limit: 200 })
+    res.json(messages)
+  } catch (err: any) {
+    console.error('GET /messages error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 router.post('/', async (req: Request, res: Response) => {
-  const message = await Message.create(req.body)
+  try {
+    const message = await Message.create(req.body)
 
-  // Emit via Socket.io
-  const io = req.app.get('io')
-  if (io) {
-    const channelId = req.body.eventId || 'general'
-    io.to(channelId).emit('new-message', message)
+    // Emit via Socket.io
+    const io = req.app.get('io')
+    if (io) {
+      const channelId = req.body.eventId || 'general'
+      io.to(channelId).emit('new-message', message)
+    }
+
+    res.status(201).json(message)
+  } catch (err: any) {
+    console.error('POST /messages error:', err.message)
+    res.status(500).json({ error: err.message })
   }
-
-  res.status(201).json(message)
 })
 
 // Briefing routes (simplified, sharing this router)

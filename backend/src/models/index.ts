@@ -315,7 +315,7 @@ Message.init({
   senderId: { type: DataTypes.STRING, defaultValue: 'team' },
   senderName: { type: DataTypes.STRING, allowNull: false },
   content: { type: DataTypes.TEXT, allowNull: false },
-  eventId: DataTypes.UUID,
+  eventId: DataTypes.STRING,
   mentions: { type: DataTypes.ARRAY(DataTypes.STRING), defaultValue: [] },
 }, { sequelize, modelName: 'Message', tableName: 'messages', timestamps: true })
 
