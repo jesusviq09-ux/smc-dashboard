@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useParams, Link } from 'react-router-dom'
-import { ChevronLeft, Play, Settings, Zap, AlertCircle } from 'lucide-react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ChevronLeft, Play, Settings, Zap, AlertCircle, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
@@ -20,9 +20,11 @@ const PRIORITY_MODES: { value: RacePriorityMode; label: string; desc: string }[]
 
 export default function RaceDetail() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [priorityMode, setPriorityMode] = useState<RacePriorityMode>('FINISH')
   const [recommendation, setRecommendation] = useState<ReturnType<typeof generateRecommendation> | null>(null)
   const [saving, setSaving] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
   const queryClient = useQueryClient()
 
   const { data: race, isLoading } = useQuery({
@@ -43,6 +45,14 @@ export default function RaceDetail() {
   })
 
   const vehicles = useLiveQuery(() => db.vehicles.toArray(), [])
+
+  const deleteMutation = useMutation({
+    mutationFn: () => raceApi.deleteEvent(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['race-events'] })
+      navigate('/races')
+    },
+  })
 
   if (isLoading) return <div className="skeleton h-96 rounded-xl" />
   if (!race) return <p className="text-smc-muted">Carrera no encontrada</p>
@@ -110,9 +120,18 @@ export default function RaceDetail() {
             {format(new Date(race.date), "d 'de' MMMM yyyy · HH:mm", { locale: es })}
           </p>
         </div>
-        <Link to={`/races/${id}/live`} className="btn-primary flex items-center gap-2">
-          <Play className="w-4 h-4" /> Modo carrera en vivo
-        </Link>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setDeleteConfirm(true)}
+            className="p-2 rounded-lg hover:bg-danger/10 text-smc-muted hover:text-danger transition-colors"
+            title="Eliminar carrera"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+          <Link to={`/races/${id}/live`} className="btn-primary flex items-center gap-2">
+            <Play className="w-4 h-4" /> Modo carrera en vivo
+          </Link>
+        </div>
       </div>
 
       {/* Race info */}
@@ -248,6 +267,30 @@ export default function RaceDetail() {
             ))}
           </CardContent>
         </Card>
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card border border-smc-border rounded-xl p-6 max-w-sm w-full">
+            <h3 className="font-semibold text-white mb-2">¿Eliminar esta carrera?</h3>
+            <p className="text-sm text-smc-muted mb-4">
+              Se eliminarán también todas las estrategias asociadas. Esta acción no se puede deshacer.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteConfirm(false)} className="btn-secondary text-sm py-1.5">
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+                className="btn-danger text-sm py-1.5"
+              >
+                {deleteMutation.isPending ? 'Eliminando...' : 'Eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

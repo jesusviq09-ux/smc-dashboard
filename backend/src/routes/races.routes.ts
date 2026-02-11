@@ -63,6 +63,12 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const event = await RaceEvent.findByPk(req.params.id)
     if (!event) return res.status(404).json({ error: 'Race not found' })
+    // Borrar stints y estrategias relacionados primero para evitar FK constraint
+    const strategies = await RaceStrategy.findAll({ where: { raceId: req.params.id } })
+    for (const strategy of strategies) {
+      await RaceStint.destroy({ where: { strategyId: strategy.id } })
+    }
+    await RaceStrategy.destroy({ where: { raceId: req.params.id } })
     await event.destroy()
     res.status(204).send()
   } catch (err: any) {
