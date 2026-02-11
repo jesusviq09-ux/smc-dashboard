@@ -17,6 +17,7 @@ const SECTIONS = [
   { key: 'goals', label: 'Objetivos' },
   { key: 'exports', label: 'Exportar' },
   { key: 'notices_write', label: 'Gestionar avisos' },
+  { key: 'accounting', label: 'Contabilidad' },
 ]
 
 export default function AdminUsers() {

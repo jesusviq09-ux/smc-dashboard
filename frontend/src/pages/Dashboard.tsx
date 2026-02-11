@@ -87,6 +87,9 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Tablón de avisos */}
+      <NoticeBoard />
+
       {/* Stats Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -288,8 +291,6 @@ export default function Dashboard() {
         </CardContent>
       </Card>
 
-      {/* Tablón de avisos */}
-      <NoticeBoard />
     </div>
   )
 }

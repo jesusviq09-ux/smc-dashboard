@@ -27,9 +27,21 @@ apiClient.interceptors.response.use(
   }
 )
 
-// Request interceptor - queue mutations when offline
+// Request interceptor - add auth token + queue mutations when offline
 apiClient.interceptors.request.use(
-  config => config,
+  config => {
+    try {
+      const raw = localStorage.getItem('smc_auth')
+      if (raw) {
+        const auth = JSON.parse(raw)
+        if (auth?.token) {
+          config.headers = config.headers ?? {}
+          config.headers.Authorization = `Bearer ${auth.token}`
+        }
+      }
+    } catch { /* ignora errores de parse */ }
+    return config
+  },
   error => Promise.reject(error)
 )
 

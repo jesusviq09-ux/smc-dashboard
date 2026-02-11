@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Dumbbell, Trophy, Wrench,
   Activity, Map, MessageSquare, BarChart3, Target,
-  Download, X, Zap, ChevronRight, ShieldCheck
+  Download, X, Zap, ChevronRight, ShieldCheck, DollarSign
 } from 'lucide-react'
 import { useMaintenanceAlerts } from '@/hooks/useMaintenanceAlerts'
 import { getStoredUser } from '@/hooks/useAuth'
@@ -22,6 +22,7 @@ const navItems = [
   { path: '/chat', label: 'Comunicación', icon: MessageSquare },
   { path: '/stats', label: 'Estadísticas', icon: BarChart3 },
   { path: '/goals', label: 'Objetivos', icon: Target },
+  { path: '/accounting', label: 'Contabilidad', icon: DollarSign, permission: 'accounting' },
   { path: '/exports', label: 'Exportar', icon: Download },
 ]
 
@@ -53,7 +54,13 @@ export default function Sidebar({ onClose }: SidebarProps) {
 
       {/* Navigation */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {navItems.map(({ path, label, icon: Icon, alerts }) => {
+        {navItems.filter(item => {
+          if (!(item as any).permission) return true
+          if (!currentUser) return false
+          if (currentUser.role === 'admin') return true
+          if (!currentUser.permissions || currentUser.permissions.length === 0) return true
+          return currentUser.permissions.includes((item as any).permission)
+        }).map(({ path, label, icon: Icon, alerts }) => {
           const isActive = location.pathname === path || location.pathname.startsWith(path + '/')
           const hasAlert = alerts && alertCount > 0
 

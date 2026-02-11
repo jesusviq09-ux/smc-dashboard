@@ -18,6 +18,7 @@ import exportsRouter from './routes/exports.routes'
 import authRouter from './routes/auth.routes'
 import adminRouter from './routes/admin.routes'
 import noticesRouter from './routes/notices.routes'
+import accountingRouter from './routes/accounting.routes'
 
 const app = express()
 
@@ -60,6 +61,7 @@ app.use('/api/exports', exportsRouter)
 app.use('/api/auth', authRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/notices', noticesRouter)
+app.use('/api/accounting', accountingRouter)
 
 // Health check
 app.get('/api/health', (_req, res) => {

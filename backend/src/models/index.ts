@@ -420,6 +420,38 @@ Notice.init({
   expiresAt: { type: DataTypes.DATE },
 }, { sequelize, modelName: 'Notice', tableName: 'notices', timestamps: true })
 
+// ============================================================
+// EXPENSE
+// ============================================================
+export class Expense extends Model {
+  declare id: string; declare name: string; declare pricePerUnit: number
+  declare units: number; declare total: number; declare date: string
+  declare productLink?: string; declare payee: string
+}
+Expense.init({
+  id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
+  name: { type: DataTypes.STRING, allowNull: false },
+  pricePerUnit: { type: DataTypes.FLOAT, allowNull: false },
+  units: { type: DataTypes.FLOAT, allowNull: false },
+  total: { type: DataTypes.FLOAT, allowNull: false },
+  date: { type: DataTypes.DATEONLY, allowNull: false },
+  productLink: { type: DataTypes.STRING, allowNull: true },
+  payee: { type: DataTypes.STRING, allowNull: false },
+}, { sequelize, modelName: 'Expense', tableName: 'expenses', timestamps: true })
+
+// ============================================================
+// INCOME
+// ============================================================
+export class Income extends Model {
+  declare id: string; declare amount: number; declare date: string; declare concept: string
+}
+Income.init({
+  id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
+  amount: { type: DataTypes.FLOAT, allowNull: false },
+  date: { type: DataTypes.DATEONLY, allowNull: false },
+  concept: { type: DataTypes.STRING, allowNull: false },
+}, { sequelize, modelName: 'Income', tableName: 'incomes', timestamps: true })
+
 export async function syncModels() {
   await sequelize.sync({ alter: true })
   console.log('All models synced')

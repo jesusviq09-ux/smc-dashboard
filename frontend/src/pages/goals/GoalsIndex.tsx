@@ -21,7 +21,7 @@ const STATUS_CONFIG: Record<GoalStatusExt, { label: string; icon: React.Componen
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  pilot: '#00d4ff',
+  pilot: '#e85d75',
   team: '#a855f7',
 }
 
@@ -90,7 +90,7 @@ export default function GoalsIndex() {
       <div className="flex gap-2 flex-wrap items-center">
         {([['all', 'Todos'], ['in_progress', 'En curso'], ['completed', 'Completado'], ['overdue', 'Vencido']] as const).map(([val, label]) => (
           <button key={val} onClick={() => setFilter(val)}
-            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filter === val ? 'bg-primary text-smc-dark' : 'bg-smc-card text-smc-muted border border-smc-border hover:text-smc-text'}`}>
+            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${filter === val ? 'bg-primary text-white' : 'bg-smc-card text-smc-muted border border-smc-border hover:text-smc-text'}`}>
             {label} ({counts[val as keyof typeof counts] ?? 0})
           </button>
         ))}
@@ -143,6 +143,8 @@ export default function GoalsIndex() {
                 <button onClick={() => { setShowNew(false); resetForm(); setSaveError(null) }} className="btn-secondary">Cancelar</button>
                 <button onClick={() => saveMutation.mutate({
                   ...form,
+                  pilotId: form.pilotId || undefined,
+                  vehicleId: form.vehicleId || undefined,
                   status: 'in_progress',
                   progress: 0,
                   metric: '',
