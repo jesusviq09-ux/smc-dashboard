@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Plus, Wrench, AlertTriangle, CheckCircle, Clock, ClipboardCheck } from 'lucide-react'
+import { Plus, Wrench, AlertTriangle, CheckCircle, Clock, ClipboardCheck, Pencil, Trash2, CheckSquare, Square } from 'lucide-react'
 import { useState } from 'react'
 import { maintenanceApi } from '@/services/api/maintenance.api'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -9,47 +9,197 @@ import { db } from '@/services/indexeddb/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { MaintenanceType, Vehicle } from '@/types'
+import { MaintenanceType, Vehicle, MaintenanceChecklist } from '@/types'
+
+const PRE_RACE_ITEMS = [
+  { id: 'tires', label: 'Presión y estado neumáticos', critical: true },
+  { id: 'battery', label: 'Nivel de carga batería (>90%)', critical: true },
+  { id: 'motor', label: 'Motor: estado y conexiones', critical: true },
+  { id: 'brakes', label: 'Frenos: respuesta y estado', critical: true },
+  { id: 'bolts', label: 'Tornillería y fijaciones', critical: true },
+  { id: 'cabling', label: 'Cableado y conectores', critical: true },
+  { id: 'bodywork', label: 'Carrocería y aerodinámica', critical: false },
+  { id: 'steering', label: 'Dirección y alineación', critical: false },
+  { id: 'coolant', label: 'Sistema de refrigeración', critical: false },
+  { id: 'electronics', label: 'Controlador electrónico', critical: false },
+]
+
+const POST_RACE_ITEMS = [
+  { id: 'inspection', label: 'Inspección general de daños', critical: true },
+  { id: 'motor_check', label: 'Revisión motor post-carrera', critical: true },
+  { id: 'battery_post', label: 'Estado batería post-carrera', critical: true },
+  { id: 'cleaning', label: 'Limpieza del vehículo', critical: false },
+  { id: 'storage', label: 'Preparación para almacenamiento', critical: false },
+]
 
 function ChecklistHistory({ vehicles }: { vehicles: Vehicle[] }) {
+  const [editChecklist, setEditChecklist] = useState<MaintenanceChecklist | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [editChecked, setEditChecked] = useState<Record<string, boolean>>({})
+  const [editSignedBy, setEditSignedBy] = useState('')
+  const [editSignatureText, setEditSignatureText] = useState('')
+  const [editDate, setEditDate] = useState('')
+  const [editError, setEditError] = useState<string | null>(null)
+
   const checklists = useLiveQuery(
     () => db.maintenanceChecklists.orderBy('date').reverse().toArray(),
     []
   )
 
+  const openEdit = (cl: MaintenanceChecklist) => {
+    const checkedMap: Record<string, boolean> = {}
+    cl.items.forEach(item => { checkedMap[item.id] = item.checked })
+    // Parse signedBy: "Nombre — Firma: texto" back into parts
+    const firmaMatch = cl.signedBy?.match(/^(.*?) — Firma: (.*)$/)
+    setEditSignedBy(firmaMatch ? firmaMatch[1] : (cl.signedBy ?? ''))
+    setEditSignatureText(firmaMatch ? firmaMatch[2] : '')
+    setEditChecked(checkedMap)
+    setEditDate(cl.date)
+    setEditError(null)
+    setEditChecklist(cl)
+  }
+
+  const handleUpdate = async () => {
+    if (!editChecklist) return
+    try {
+      setEditError(null)
+      await db.maintenanceChecklists.update(editChecklist.id, {
+        date: editDate,
+        items: editChecklist.items.map(item => ({ ...item, checked: editChecked[item.id] ?? item.checked })),
+        signedBy: `${editSignedBy}${editSignatureText ? ` — Firma: ${editSignatureText}` : ''}`,
+      })
+      setEditChecklist(null)
+    } catch (err: any) {
+      setEditError(err?.message || 'Error al actualizar el checklist')
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    await db.maintenanceChecklists.delete(id)
+    setDeleteConfirmId(null)
+  }
+
   if (!checklists || checklists.length === 0) return null
 
+  const editItems = editChecklist
+    ? (editChecklist.type === 'pre_race' ? PRE_RACE_ITEMS : POST_RACE_ITEMS)
+    : []
+
   return (
-    <Card title="Checklists firmados">
-      <CardContent className="pt-3">
-        <div className="space-y-2">
-          {checklists.map(cl => {
-            const vehicleName = vehicles.find(v => v.id === cl.vehicleId)?.name ?? cl.vehicleId
-            const checkedCount = cl.items.filter(i => i.checked).length
-            const totalCount = cl.items.length
-            return (
-              <div key={cl.id} className="flex items-start gap-3 p-3 rounded-lg border border-smc-border bg-smc-darker">
-                <ClipboardCheck className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-white text-sm">{vehicleName}</span>
-                    <span className="badge-blue text-xs">{cl.type === 'pre_race' ? 'Pre-carrera' : 'Post-carrera'}</span>
-                    <span className="badge-green text-xs">{checkedCount}/{totalCount} ítems</span>
+    <>
+      <Card title="Checklists firmados">
+        <CardContent className="pt-3">
+          <div className="space-y-2">
+            {checklists.map(cl => {
+              const vehicleName = vehicles.find(v => v.id === cl.vehicleId)?.name ?? cl.vehicleId
+              const checkedCount = cl.items.filter(i => i.checked).length
+              const totalCount = cl.items.length
+              return (
+                <div key={cl.id} className="flex items-start gap-3 p-3 rounded-lg border border-smc-border bg-smc-darker">
+                  <ClipboardCheck className="w-4 h-4 text-success flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-medium text-white text-sm">{vehicleName}</span>
+                      <span className="badge-blue text-xs">{cl.type === 'pre_race' ? 'Pre-carrera' : 'Post-carrera'}</span>
+                      <span className="badge-green text-xs">{checkedCount}/{totalCount} ítems</span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1 text-xs text-smc-muted flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
+                        {format(new Date(cl.date), "d MMM yyyy", { locale: es })}
+                      </span>
+                      {cl.signedBy && <span>Firmado: {cl.signedBy}</span>}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 mt-1 text-xs text-smc-muted flex-wrap">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      {format(new Date(cl.date), "d MMM yyyy", { locale: es })}
-                    </span>
-                    {cl.signedBy && <span>Firmado: {cl.signedBy}</span>}
+                  <div className="flex gap-1 flex-shrink-0">
+                    <button onClick={() => openEdit(cl)} className="p-1.5 rounded-lg hover:bg-smc-card text-smc-muted hover:text-primary" title="Editar">
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setDeleteConfirmId(cl.id)} className="p-1.5 rounded-lg hover:bg-smc-card text-smc-muted hover:text-danger" title="Eliminar">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
+              )
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Edit modal */}
+      {editChecklist && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card rounded-xl p-6 max-w-md w-full space-y-4 border border-smc-border max-h-[90vh] overflow-y-auto">
+            <h3 className="font-semibold text-smc-text">Editar checklist</h3>
+
+            <div>
+              <label className="form-label">Fecha</label>
+              <input type="date" className="input-field" value={editDate} onChange={e => setEditDate(e.target.value)} />
+            </div>
+
+            <div className="space-y-2">
+              {editItems.map(item => (
+                <button key={item.id} type="button"
+                  onClick={() => setEditChecked(c => ({ ...c, [item.id]: !c[item.id] }))}
+                  className={`w-full flex items-center gap-3 p-2.5 rounded-lg border text-left transition-colors ${
+                    editChecked[item.id]
+                      ? 'border-success bg-success/10'
+                      : item.critical
+                      ? 'border-danger/30 bg-danger/5'
+                      : 'border-smc-border'
+                  }`}
+                >
+                  {editChecked[item.id]
+                    ? <CheckSquare className="w-4 h-4 text-success flex-shrink-0" />
+                    : <Square className={`w-4 h-4 flex-shrink-0 ${item.critical ? 'text-danger' : 'text-smc-muted'}`} />
+                  }
+                  <span className="text-sm text-smc-text">{item.label}</span>
+                  {item.critical && !editChecked[item.id] && (
+                    <span className="ml-auto badge-red text-xs">Crítico</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="form-label">Nombre firmante *</label>
+                <input type="text" className="input-field" value={editSignedBy} onChange={e => setEditSignedBy(e.target.value)} />
               </div>
-            )
-          })}
+              <div>
+                <label className="form-label">Firma</label>
+                <input type="text" className="input-field italic font-serif" value={editSignatureText} onChange={e => setEditSignatureText(e.target.value)} />
+              </div>
+            </div>
+
+            {editError && (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">{editError}</div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditChecklist(null)} className="btn-secondary">Cancelar</button>
+              <button onClick={handleUpdate} disabled={!editSignedBy || !editDate} className="btn-primary">Guardar cambios</button>
+            </div>
+          </div>
         </div>
-      </CardContent>
-    </Card>
+      )}
+
+      {/* Delete confirm modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card rounded-xl p-6 max-w-sm w-full space-y-4 border border-smc-border">
+            <h3 className="font-semibold text-smc-text">¿Eliminar checklist?</h3>
+            <p className="text-sm text-smc-muted">Esta acción no se puede deshacer.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteConfirmId(null)} className="btn-secondary">Cancelar</button>
+              <button onClick={() => handleDelete(deleteConfirmId)} className="btn-danger flex items-center gap-2">
+                <Trash2 className="w-4 h-4" /> Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 

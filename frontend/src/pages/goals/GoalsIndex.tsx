@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Target, CheckCircle2, Clock, AlertCircle, Trash2 } from 'lucide-react'
+import { Plus, Target, CheckCircle2, Clock, AlertCircle, Trash2, Pencil } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { goalsApi } from '@/services/api/goals.api'
 import type { Goal, GoalStatus } from '@/types'
@@ -32,6 +32,9 @@ export default function GoalsIndex() {
   const [vehicleFilter, setVehicleFilter] = useState('')
   const [saveError, setSaveError] = useState<string | null>(null)
   const [form, setForm] = useState({ title: '', description: '', type: 'team' as 'pilot' | 'team', deadline: '', pilotId: '', vehicleId: '' })
+  const [editGoal, setEditGoal] = useState<Goal | null>(null)
+  const [editForm, setEditForm] = useState({ title: '', description: '', type: 'team' as 'pilot' | 'team', deadline: '', vehicleId: '' })
+  const [editError, setEditError] = useState<string | null>(null)
 
   const { data: goals = [], isLoading } = useQuery({ queryKey: ['goals'], queryFn: goalsApi.getAll })
 
@@ -42,7 +45,8 @@ export default function GoalsIndex() {
   })
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Goal> }) => goalsApi.update(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['goals'] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['goals'] }); setEditGoal(null); setEditError(null) },
+    onError: (err: any) => setEditError(err?.response?.data?.error || err?.message || 'Error al actualizar el objetivo'),
   })
   const deleteMutation = useMutation({
     mutationFn: goalsApi.delete,
@@ -50,6 +54,18 @@ export default function GoalsIndex() {
   })
 
   const resetForm = () => setForm({ title: '', description: '', type: 'team', deadline: '', pilotId: '', vehicleId: '' })
+
+  const openEditGoal = (goal: Goal) => {
+    setEditForm({
+      title: goal.title,
+      description: goal.description ?? '',
+      type: goal.type as 'pilot' | 'team',
+      deadline: goal.deadline?.slice(0, 10) ?? '',
+      vehicleId: (goal as any).vehicleId ?? '',
+    })
+    setEditError(null)
+    setEditGoal(goal)
+  }
 
   const filtered = goals
     .filter(g => filter === 'all' || g.status === filter)
@@ -191,6 +207,9 @@ export default function GoalsIndex() {
                         <CheckCircle2 className="w-4 h-4" />
                       </button>
                     )}
+                    <button onClick={() => openEditGoal(goal)} className="text-smc-muted hover:text-primary p-1 rounded" title="Editar">
+                      <Pencil className="w-4 h-4" />
+                    </button>
                     <button onClick={() => deleteMutation.mutate(goal.id)} className="text-smc-muted hover:text-danger p-1 rounded">
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -199,6 +218,69 @@ export default function GoalsIndex() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Edit goal modal */}
+      {editGoal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card rounded-xl p-6 max-w-md w-full space-y-4 border border-smc-border">
+            <h3 className="font-semibold text-smc-text">Editar objetivo</h3>
+
+            <div>
+              <label className="form-label">Título *</label>
+              <input type="text" className="input-field" value={editForm.title}
+                onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="form-label">Tipo</label>
+                <select className="input-field" value={editForm.type}
+                  onChange={e => setEditForm(f => ({ ...f, type: e.target.value as 'pilot' | 'team' }))}>
+                  <option value="team">Equipo</option>
+                  <option value="pilot">Piloto</option>
+                </select>
+              </div>
+              <div>
+                <label className="form-label">Coche (opcional)</label>
+                <select className="input-field" value={editForm.vehicleId}
+                  onChange={e => setEditForm(f => ({ ...f, vehicleId: e.target.value }))}>
+                  <option value="">Sin coche específico</option>
+                  <option value="smc01">SMC 01</option>
+                  <option value="smc02">SMC 02 EVO</option>
+                </select>
+              </div>
+              <div className="col-span-2">
+                <label className="form-label">Fecha límite *</label>
+                <input type="date" className="input-field" value={editForm.deadline}
+                  onChange={e => setEditForm(f => ({ ...f, deadline: e.target.value }))} />
+              </div>
+            </div>
+
+            <div>
+              <label className="form-label">Descripción</label>
+              <textarea className="input-field min-h-[70px]" value={editForm.description}
+                onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} />
+            </div>
+
+            {editError && (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                {editError}
+              </div>
+            )}
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setEditGoal(null); setEditError(null) }} className="btn-secondary">Cancelar</button>
+              <button
+                onClick={() => updateMutation.mutate({ id: editGoal.id, data: editForm })}
+                disabled={!editForm.title || !editForm.deadline || updateMutation.isPending}
+                className="btn-primary"
+              >
+                {updateMutation.isPending ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
