@@ -133,7 +133,6 @@ export default function GoalsIndex() {
                   currentValue: 0,
                   targetValue: 100,
                   unit: '',
-                  createdAt: new Date().toISOString(),
                 } as any)}
                   disabled={!form.title || !form.deadline || saveMutation.isPending} className="btn-primary">
                   {saveMutation.isPending ? 'Guardando...' : 'Guardar'}

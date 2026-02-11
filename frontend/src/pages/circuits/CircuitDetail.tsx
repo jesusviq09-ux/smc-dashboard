@@ -1,6 +1,7 @@
+import { useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Trophy, Clock, TrendingUp, MapPin, Pencil } from 'lucide-react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { ArrowLeft, Trophy, MapPin, Pencil, Trash2 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { circuitsApi } from '@/services/api/circuits.api'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
@@ -9,6 +10,9 @@ import { formatLapTime } from '@/utils/lapStatistics'
 export default function CircuitDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const { data: circuit, isLoading } = useQuery({
     queryKey: ['circuit', id],
@@ -20,6 +24,12 @@ export default function CircuitDetail() {
     queryKey: ['circuit-records', id],
     queryFn: () => circuitsApi.getRecords(id!),
     enabled: !!id,
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: () => circuitsApi.delete(id!),
+    onSuccess: () => navigate('/circuits'),
+    onError: (err: any) => setDeleteError(err?.response?.data?.error || err?.message || 'Error al eliminar el circuito'),
   })
 
   if (isLoading) return <div className="skeleton h-64 rounded-xl" />
@@ -48,6 +58,9 @@ export default function CircuitDetail() {
         <Link to={`/circuits/${id}/edit`} className="btn-secondary flex items-center gap-2">
           <Pencil className="w-4 h-4" /> Editar
         </Link>
+        <button onClick={() => setConfirmDelete(true)} className="btn-danger flex items-center gap-2">
+          <Trash2 className="w-4 h-4" /> Eliminar
+        </button>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -130,6 +143,34 @@ export default function CircuitDetail() {
           </Card>
         ))}
       </div>
+
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card rounded-xl p-6 max-w-sm w-full space-y-4 border border-smc-border">
+            <h3 className="font-semibold text-smc-text">¿Eliminar circuito?</h3>
+            <p className="text-sm text-smc-muted">Se eliminará <span className="text-smc-text font-medium">{circuit.name}</span> de forma permanente. Esta acción no se puede deshacer.</p>
+            {deleteError && (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                {deleteError}
+              </div>
+            )}
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setConfirmDelete(false); setDeleteError(null) }} className="btn-secondary">
+                Cancelar
+              </button>
+              <button
+                onClick={() => deleteMutation.mutate()}
+                disabled={deleteMutation.isPending}
+                className="btn-danger flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                {deleteMutation.isPending ? 'Eliminando...' : 'Eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

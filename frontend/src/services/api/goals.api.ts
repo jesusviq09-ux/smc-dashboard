@@ -16,7 +16,7 @@ export const goalsApi = {
     return res.data
   },
   update: async (id: string, data: Partial<Goal>): Promise<Goal> => {
-    const res = await apiClient.patch(`/goals/${id}`, data)
+    const res = await apiClient.put(`/goals/${id}`, data)
     return res.data
   },
   delete: async (id: string): Promise<void> => {

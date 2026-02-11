@@ -34,6 +34,7 @@ export default function VehicleChecklist() {
   const [signatureText, setSignatureText] = useState('')
   const [signatureDate, setSignatureDate] = useState(new Date().toISOString().split('T')[0])
   const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const vehicle = useLiveQuery(() => db.vehicles.get(vehicleId!), [vehicleId])
   const items = type === 'pre_race' ? PRE_RACE_ITEMS : POST_RACE_ITEMS
@@ -42,23 +43,28 @@ export default function VehicleChecklist() {
   const totalChecked = items.filter(i => checked[i.id]).length
 
   const handleSave = async () => {
-    await db.maintenanceChecklists.add({
-      id: crypto.randomUUID(),
-      vehicleId: vehicleId!,
-      type,
-      date: signatureDate,
-      items: items.map(item => ({
-        id: item.id,
-        checklistId: '',
-        label: item.label,
-        checked: checked[item.id] ?? false,
-        critical: item.critical,
-      })),
-      signedBy: `${signedBy}${signatureText ? ` — Firma: ${signatureText}` : ''}`,
-      completedAt: new Date().toISOString(),
-    })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+    try {
+      setSaveError(null)
+      await db.maintenanceChecklists.add({
+        id: crypto.randomUUID(),
+        vehicleId: vehicleId!,
+        type,
+        date: signatureDate,
+        items: items.map(item => ({
+          id: item.id,
+          checklistId: '',
+          label: item.label,
+          checked: checked[item.id] ?? false,
+          critical: item.critical,
+        })),
+        signedBy: `${signedBy}${signatureText ? ` — Firma: ${signatureText}` : ''}`,
+        completedAt: new Date().toISOString(),
+      })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch (err: any) {
+      setSaveError(err?.message || 'Error al guardar el checklist')
+    }
   }
 
   return (
@@ -141,6 +147,12 @@ export default function VehicleChecklist() {
                 />
               </div>
             </div>
+
+            {saveError && (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+                {saveError}
+              </div>
+            )}
 
             <button
               onClick={handleSave}
