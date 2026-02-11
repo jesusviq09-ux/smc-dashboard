@@ -1,0 +1,157 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-smc-border;
+  }
+
+  html {
+    @apply bg-smc-dark text-smc-text;
+    font-feature-settings: 'cv11', 'ss01';
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    @apply min-h-screen bg-smc-dark text-smc-text antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-smc-darker;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-smc-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-smc-muted;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-smc-card border border-smc-border rounded-xl p-4;
+  }
+
+  .card-hover {
+    @apply card transition-all duration-200 hover:border-primary/50 hover:shadow-lg hover:shadow-primary/5;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-smc-darker font-semibold px-4 py-2 rounded-lg
+           hover:bg-primary/90 active:scale-95 transition-all duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-smc-card border border-smc-border text-smc-text font-medium px-4 py-2 rounded-lg
+           hover:border-primary/50 hover:text-primary active:scale-95 transition-all duration-150
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply bg-danger/10 border border-danger/30 text-danger font-medium px-4 py-2 rounded-lg
+           hover:bg-danger/20 active:scale-95 transition-all duration-150;
+  }
+
+  .input-field {
+    @apply w-full bg-smc-darker border border-smc-border rounded-lg px-3 py-2
+           text-smc-text placeholder-smc-muted
+           focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50
+           transition-all duration-150;
+  }
+
+  .label {
+    @apply text-sm font-medium text-smc-muted mb-1 block;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-green {
+    @apply badge bg-success/10 text-success border border-success/20;
+  }
+
+  .badge-yellow {
+    @apply badge bg-warning/10 text-warning border border-warning/20;
+  }
+
+  .badge-red {
+    @apply badge bg-danger/10 text-danger border border-danger/20;
+  }
+
+  .badge-blue {
+    @apply badge bg-info/10 text-info border border-info/20;
+  }
+
+  .badge-primary {
+    @apply badge bg-primary/10 text-primary border border-primary/20;
+  }
+
+  .section-title {
+    @apply text-2xl font-bold text-white mb-6;
+  }
+
+  .page-header {
+    @apply flex items-center justify-between mb-6;
+  }
+
+  .stat-card {
+    @apply card flex flex-col gap-1;
+  }
+
+  .stat-value {
+    @apply text-3xl font-bold text-white;
+  }
+
+  .stat-label {
+    @apply text-sm text-smc-muted;
+  }
+}
+
+/* Animations */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #161b22 25%, #1c2128 50%, #161b22 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  @apply rounded-lg;
+}
+
+/* Racing-specific styles */
+.timer-display {
+  @apply font-mono text-4xl font-bold tabular-nums;
+}
+
+.lap-time {
+  @apply font-mono text-sm tabular-nums;
+}
+
+.score-ring {
+  transition: stroke-dashoffset 0.8s ease-in-out;
+}
+
+/* Status traffic light */
+.status-green {
+  @apply w-3 h-3 rounded-full bg-success shadow-[0_0_8px_rgba(63,185,80,0.6)] animate-pulse-slow;
+}
+
+.status-yellow {
+  @apply w-3 h-3 rounded-full bg-warning shadow-[0_0_8px_rgba(210,153,34,0.6)] animate-pulse-slow;
+}
+
+.status-red {
+  @apply w-3 h-3 rounded-full bg-danger shadow-[0_0_8px_rgba(248,81,73,0.6)] animate-pulse;
+}

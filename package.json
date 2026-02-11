@@ -1,0 +1,22 @@
+{
+  "name": "smc-dashboard",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SMC Greenpower F24 Team Management Platform",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "cd frontend && pnpm dev",
+    "dev:backend": "cd backend && pnpm dev",
+    "build": "cd frontend && pnpm build",
+    "db:migrate": "cd backend && pnpm db:migrate",
+    "db:seed": "cd backend && pnpm db:seed",
+    "db:reset": "cd backend && pnpm db:reset"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

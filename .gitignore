@@ -1,0 +1,39 @@
+# Dependencias
+node_modules/
+.pnp
+.pnp.js
+
+# Variables de entorno — NUNCA subir credenciales reales
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# Builds
+dist/
+build/
+frontend/dist/
+backend/dist/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker local (volúmenes de datos)
+postgres_data/
+
+# Archivos subidos por usuarios (no son código fuente)
+backend/uploads/*
+!backend/uploads/.gitkeep
