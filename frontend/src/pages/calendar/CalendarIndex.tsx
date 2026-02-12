@@ -44,7 +44,7 @@ export default function CalendarIndex() {
   const { data: customEvents = [] } = useQuery({ queryKey: ['calendar-events'], queryFn: calendarApi.getEvents })
   const { data: races = [] } = useQuery({ queryKey: ['race-events'], queryFn: raceApi.getEvents })
   const { data: trainings = [] } = useQuery({ queryKey: ['training-sessions'], queryFn: trainingApi.getSessions })
-  const { data: maintenanceRecords = [] } = useQuery({ queryKey: ['maintenance'], queryFn: maintenanceApi.getRecords })
+  const { data: maintenanceRecords = [] } = useQuery({ queryKey: ['maintenance'], queryFn: () => maintenanceApi.getRecords() })
 
   const createMutation = useMutation({
     mutationFn: calendarApi.createEvent,
