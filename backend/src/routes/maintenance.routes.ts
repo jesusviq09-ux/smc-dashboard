@@ -124,9 +124,9 @@ router.post('/parts', async (req: Request, res: Response) => {
     const part = await SparePart.create(req.body)
     // Check stock on creation
     if (part.stock <= part.minStock) {
-      const mechanics = await User.findAll({ where: { department: 'mecanica' } })
-      const emails = [...new Set([...mechanics.map((u: any) => u.email), 'smcgreenpower@gmail.com'])]
-      sendLowStockAlert(part, emails).catch(console.error)
+      const recipients = await User.findAll({ where: { receiveEmails: true } })
+      const emails = [...new Set(recipients.map((u: any) => u.email))]
+      if (emails.length > 0) sendLowStockAlert(part, emails).catch(console.error)
     }
     res.status(201).json(part)
   } catch (err: any) {
@@ -143,9 +143,9 @@ router.put('/parts/:id', async (req: Request, res: Response) => {
     await part.update(req.body)
     // Send email notification if stock is at or below minimum
     if (part.stock <= part.minStock) {
-      const mechanics = await User.findAll({ where: { department: 'mecanica' } })
-      const emails = [...new Set([...mechanics.map((u: any) => u.email), 'smcgreenpower@gmail.com'])]
-      sendLowStockAlert(part, emails).catch(console.error)
+      const recipients = await User.findAll({ where: { receiveEmails: true } })
+      const emails = [...new Set(recipients.map((u: any) => u.email))]
+      if (emails.length > 0) sendLowStockAlert(part, emails).catch(console.error)
     }
     res.json(part)
   } catch (err: any) {

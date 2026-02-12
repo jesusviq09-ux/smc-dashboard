@@ -27,7 +27,7 @@ function requireAdmin(req: Request, res: Response, next: Function) {
 router.get('/users', requireAdmin, async (_req: Request, res: Response) => {
   try {
     const users = await User.findAll({
-      attributes: ['id', 'email', 'name', 'department', 'role', 'permissions'],
+      attributes: ['id', 'email', 'name', 'department', 'role', 'permissions', 'receiveEmails'],
       order: [['name', 'ASC']],
     })
     res.json(users)
@@ -69,6 +69,19 @@ router.put('/users/:id/role', requireAdmin, async (req: Request, res: Response) 
     }
     await user.update({ role })
     res.json({ id: user.id, email: user.email, name: user.name, role: user.role })
+  } catch (err: any) {
+    console.error(err)
+    res.status(500).json({ error: err.message || 'Error interno' })
+  }
+})
+
+// PUT /api/admin/users/:id/email-notifications
+router.put('/users/:id/email-notifications', requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const user = await User.findByPk(req.params.id)
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
+    await user.update({ receiveEmails: !!req.body.receiveEmails })
+    res.json({ id: user.id, receiveEmails: user.receiveEmails })
   } catch (err: any) {
     console.error(err)
     res.status(500).json({ error: err.message || 'Error interno' })

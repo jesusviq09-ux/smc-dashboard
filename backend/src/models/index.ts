@@ -390,7 +390,7 @@ PilotRatingHistory.init({
 export class User extends Model {
   declare id: string; declare email: string; declare passwordHash: string
   declare name: string; declare department: string
-  declare role: string; declare permissions: string[]
+  declare role: string; declare permissions: string[]; declare receiveEmails: boolean
 }
 User.init({
   id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
@@ -400,6 +400,7 @@ User.init({
   department: { type: DataTypes.STRING, allowNull: false, defaultValue: 'technical' },
   role: { type: DataTypes.STRING, defaultValue: 'user' },
   permissions: { type: DataTypes.ARRAY(DataTypes.STRING), defaultValue: [] },
+  receiveEmails: { type: DataTypes.BOOLEAN, defaultValue: true },
 }, { sequelize, modelName: 'User', tableName: 'users', timestamps: true })
 
 // ============================================================

@@ -15,6 +15,7 @@ function buildUserPayload(user: User) {
     department: user.department,
     role: user.role || 'user',
     permissions: user.permissions || [],
+    receiveEmails: user.receiveEmails ?? true,
   }
 }
 
@@ -79,10 +80,11 @@ router.put('/profile', async (req: Request, res: Response) => {
     const decoded = jwt.verify(token, JWT_SECRET) as any
     const user = await User.findByPk(decoded.id)
     if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
-    const { name, department } = req.body
+    const { name, department, receiveEmails } = req.body
     await user.update({
       ...(name?.trim() ? { name: name.trim() } : {}),
       ...(department?.trim() ? { department: department.trim() } : {}),
+      ...(receiveEmails !== undefined ? { receiveEmails: !!receiveEmails } : {}),
     })
     res.json({ user: buildUserPayload(user) })
   } catch (err: any) {

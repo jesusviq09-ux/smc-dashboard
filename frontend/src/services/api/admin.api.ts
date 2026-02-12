@@ -7,6 +7,7 @@ export interface AdminUser {
   department: string
   role: 'admin' | 'user'
   permissions: string[]
+  receiveEmails: boolean
 }
 
 export const adminApi = {
@@ -22,6 +23,11 @@ export const adminApi = {
 
   updateRole: async (userId: string, role: 'admin' | 'user'): Promise<AdminUser> => {
     const { data } = await apiClient.put<AdminUser>(`/admin/users/${userId}/role`, { role })
+    return data
+  },
+
+  updateEmailNotifications: async (userId: string, receiveEmails: boolean): Promise<{ id: string; receiveEmails: boolean }> => {
+    const { data } = await apiClient.put(`/admin/users/${userId}/email-notifications`, { receiveEmails })
     return data
   },
 }

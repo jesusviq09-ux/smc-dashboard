@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeft, UserCog, Save, CheckCircle, X } from 'lucide-react'
+import { ChevronLeft, UserCog, Save, CheckCircle, X, Mail, MailX } from 'lucide-react'
 import { useMutation } from '@tanstack/react-query'
 import { apiClient } from '@/services/api/client'
 import { getStoredUser } from '@/hooks/useAuth'
@@ -28,6 +28,7 @@ export default function ProfilePage() {
   const [name, setName] = useState(currentUser?.name ?? '')
   const [selectedRoles, setSelectedRoles] = useState<string[]>(parseDept(currentUser?.department ?? ''))
   const [customRole, setCustomRole] = useState('')
+  const [receiveEmails, setReceiveEmails] = useState(currentUser?.receiveEmails ?? true)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
@@ -53,6 +54,7 @@ export default function ProfilePage() {
     mutationFn: () => apiClient.put<{ user: AuthUser }>('/auth/profile', {
       name: name.trim(),
       department: getDepartmentLabel(),
+      receiveEmails,
     }),
     onSuccess: ({ data }) => {
       // Update localStorage with fresh data
@@ -61,6 +63,7 @@ export default function ProfilePage() {
         if (raw) {
           const auth = JSON.parse(raw)
           localStorage.setItem('smc_auth', JSON.stringify({ ...auth, user: data.user }))
+          window.dispatchEvent(new CustomEvent('smc-user-updated'))
         }
       } catch { /* ignore */ }
       setSuccess(true)
@@ -202,6 +205,30 @@ export default function ProfilePage() {
               {currentUser?.role === 'admin' ? 'Administrador' : 'Usuario'}
             </span>
           </div>
+        </div>
+
+        {/* Email notifications toggle */}
+        <div className="flex items-center justify-between py-2.5 px-3 rounded-lg border border-smc-border bg-smc-darker">
+          <div className="flex items-center gap-2">
+            {receiveEmails ? (
+              <Mail className="w-4 h-4 text-success" />
+            ) : (
+              <MailX className="w-4 h-4 text-smc-muted" />
+            )}
+            <div>
+              <span className="text-sm text-smc-text">Recibir notificaciones por email</span>
+              <p className="text-xs text-smc-muted">Alertas de stock bajo y avisos de mantenimiento</p>
+            </div>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={receiveEmails}
+              onChange={e => { setReceiveEmails(e.target.checked); setSuccess(false) }}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-smc-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-smc-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+          </label>
         </div>
 
         <div className="flex justify-end">

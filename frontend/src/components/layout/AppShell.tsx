@@ -1,9 +1,14 @@
-import { ReactNode, useState } from 'react'
+import { ReactNode, useState, useEffect, useRef } from 'react'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
 import BottomNav from './BottomNav'
 import OfflineBanner from './OfflineBanner'
 import { useOnlineStatus } from '@/hooks/useOnlineStatus'
+import { refreshUserFromServer } from '@/hooks/useAuth'
+import { useLocation } from 'react-router-dom'
+
+const API_BASE = import.meta.env.VITE_API_URL || '/api'
+const SERVER_BASE = API_BASE.replace('/api', '')
 
 interface AppShellProps {
   children: ReactNode
@@ -12,6 +17,32 @@ interface AppShellProps {
 export default function AppShell({ children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const isOnline = useOnlineStatus()
+  const location = useLocation()
+  const lastRefreshRef = useRef<number>(0)
+
+  // On mount: refresh user permissions from server
+  useEffect(() => {
+    lastRefreshRef.current = Date.now()
+    refreshUserFromServer()
+  }, [])
+
+  // On each route change: refresh permissions (max once per minute) to pick up admin changes without re-login
+  useEffect(() => {
+    const now = Date.now()
+    if (now - lastRefreshRef.current > 60_000) {
+      lastRefreshRef.current = now
+      refreshUserFromServer()
+    }
+  }, [location.pathname])
+
+  // Keep-alive ping every 25 minutes to prevent Railway free tier cold starts
+  useEffect(() => {
+    const ping = () => {
+      fetch(`${SERVER_BASE}/api/health`, { method: 'GET' }).catch(() => {})
+    }
+    const interval = setInterval(ping, 25 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   return (
     <div className="flex h-screen bg-smc-dark overflow-hidden">

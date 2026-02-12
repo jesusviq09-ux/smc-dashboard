@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { apiClient } from '@/services/api/client'
 
 export interface AuthUser {
@@ -8,6 +8,7 @@ export interface AuthUser {
   department: string
   role: 'admin' | 'user'
   permissions: string[]
+  receiveEmails: boolean
 }
 
 interface AuthState {
@@ -75,4 +76,42 @@ export function getStoredUser(): AuthUser | null {
 export function getStoredToken(): string | null {
   const auth = loadAuth()
   return auth?.token ?? null
+}
+
+/**
+ * Refresca los permisos y datos del usuario desde el servidor.
+ * Llama a GET /api/auth/me con el token actual y actualiza localStorage.
+ * Silencioso si falla (offline, cold start, etc.).
+ */
+export async function refreshUserFromServer(): Promise<void> {
+  try {
+    const auth = loadAuth()
+    if (!auth?.token) return
+    const { data } = await apiClient.get<{ user: AuthUser }>('/auth/me')
+    if (data?.user) {
+      const updated: AuthState = { token: auth.token, user: data.user }
+      saveAuth(updated)
+      // Notificar a los componentes que usan useCurrentUser() que los datos han cambiado
+      window.dispatchEvent(new CustomEvent('smc-user-updated'))
+    }
+  } catch {
+    // Silencioso — no interrumpir la app si falla el refresh
+  }
+}
+
+/**
+ * Hook reactivo que se actualiza cuando refreshUserFromServer() obtiene datos nuevos.
+ * Usar en lugar de getStoredUser() dentro de componentes que necesiten reaccionar
+ * a cambios de permisos en tiempo real (ej: Sidebar).
+ */
+export function useCurrentUser(): AuthUser | null {
+  const [user, setUser] = useState<AuthUser | null>(getStoredUser)
+
+  useEffect(() => {
+    const handler = () => setUser(getStoredUser())
+    window.addEventListener('smc-user-updated', handler)
+    return () => window.removeEventListener('smc-user-updated', handler)
+  }, [])
+
+  return user
 }

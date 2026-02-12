@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ShieldCheck, ShieldOff, Save, Users } from 'lucide-react'
+import { ShieldCheck, ShieldOff, Save, Users, Mail, MailX } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { adminApi, type AdminUser } from '@/services/api/admin.api'
 import { getStoredUser } from '@/hooks/useAuth'
@@ -56,6 +56,12 @@ export default function AdminUsers() {
   const roleMutation = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: 'admin' | 'user' }) =>
       adminApi.updateRole(userId, role),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+  })
+
+  const emailMutation = useMutation({
+    mutationFn: ({ userId, receiveEmails }: { userId: string; receiveEmails: boolean }) =>
+      adminApi.updateEmailNotifications(userId, receiveEmails),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
   })
 
@@ -138,7 +144,28 @@ export default function AdminUsers() {
                         </label>
                       ))}
                     </div>
-                    <div className="flex items-center gap-2 justify-end">
+                    {/* Email notifications toggle */}
+                    <div className="flex items-center justify-between py-2.5 px-3 rounded-lg border border-smc-border bg-smc-darker mt-2">
+                      <div className="flex items-center gap-2">
+                        {(user.receiveEmails ?? true) ? (
+                          <Mail className="w-4 h-4 text-success" />
+                        ) : (
+                          <MailX className="w-4 h-4 text-smc-muted" />
+                        )}
+                        <span className="text-sm text-smc-text">Recibir notificaciones por email</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={user.receiveEmails ?? true}
+                          onChange={e => emailMutation.mutate({ userId: user.id, receiveEmails: e.target.checked })}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-smc-border peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-smc-border after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary"></div>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center gap-2 justify-end mt-2">
                       {saveSuccess === user.id && (
                         <span className="text-xs text-success">✓ Guardado</span>
                       )}

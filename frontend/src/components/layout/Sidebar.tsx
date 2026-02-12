@@ -5,7 +5,7 @@ import {
   Download, X, Zap, ChevronRight, ShieldCheck, DollarSign
 } from 'lucide-react'
 import { useMaintenanceAlerts } from '@/hooks/useMaintenanceAlerts'
-import { getStoredUser } from '@/hooks/useAuth'
+import { useCurrentUser } from '@/hooks/useAuth'
 
 interface SidebarProps {
   onClose?: () => void
@@ -29,7 +29,7 @@ const navItems = [
 export default function Sidebar({ onClose }: SidebarProps) {
   const location = useLocation()
   const { alertCount } = useMaintenanceAlerts()
-  const currentUser = getStoredUser()
+  const currentUser = useCurrentUser()
   const isAdmin = currentUser?.role === 'admin'
 
   return (
