@@ -453,6 +453,39 @@ Income.init({
   concept: { type: DataTypes.STRING, allowNull: false },
 }, { sequelize, modelName: 'Income', tableName: 'incomes', timestamps: true })
 
+// ============================================================
+// CALENDAR EVENT
+// ============================================================
+export class CalendarEvent extends Model {
+  declare id: string; declare title: string; declare date: string
+  declare endDate?: string; declare type: string
+  declare description?: string; declare color?: string
+}
+CalendarEvent.init({
+  id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
+  title: { type: DataTypes.STRING, allowNull: false },
+  date: { type: DataTypes.DATEONLY, allowNull: false },
+  endDate: DataTypes.DATEONLY,
+  type: { type: DataTypes.STRING, defaultValue: 'event' },
+  description: DataTypes.TEXT,
+  color: DataTypes.STRING,
+}, { sequelize, modelName: 'CalendarEvent', tableName: 'calendar_events', timestamps: true })
+
+// ============================================================
+// PASSWORD RESET TOKEN
+// ============================================================
+export class PasswordResetToken extends Model {
+  declare id: string; declare userId: string; declare token: string
+  declare expiresAt: Date; declare used: boolean
+}
+PasswordResetToken.init({
+  id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
+  userId: { type: DataTypes.UUID, allowNull: false },
+  token: { type: DataTypes.STRING, allowNull: false, unique: true },
+  expiresAt: { type: DataTypes.DATE, allowNull: false },
+  used: { type: DataTypes.BOOLEAN, defaultValue: false },
+}, { sequelize, modelName: 'PasswordResetToken', tableName: 'password_reset_tokens', timestamps: false })
+
 export async function syncModels() {
   await sequelize.sync({ alter: true })
   console.log('All models synced')

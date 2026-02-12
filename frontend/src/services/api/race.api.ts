@@ -95,4 +95,9 @@ export const raceApi = {
     await db.raceStrategies.put(data)
     return data
   },
+
+  updateStint: async (stintId: string, updates: Record<string, unknown>) => {
+    const { data } = await apiClient.put(`/races/strategies/stints/${stintId}`, updates)
+    return data
+  },
 }

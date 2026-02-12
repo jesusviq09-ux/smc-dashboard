@@ -2,7 +2,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Users, Dumbbell, Trophy, Wrench,
   Activity, Map, MessageSquare, BarChart3, Target,
-  Download, X, Zap, ChevronRight, ShieldCheck, DollarSign
+  Download, X, Zap, ChevronRight, ShieldCheck, DollarSign, CalendarDays
 } from 'lucide-react'
 import { useMaintenanceAlerts } from '@/hooks/useMaintenanceAlerts'
 import { useCurrentUser } from '@/hooks/useAuth'
@@ -16,6 +16,7 @@ const navItems = [
   { path: '/pilots', label: 'Pilotos', icon: Users },
   { path: '/training', label: 'Entrenamientos', icon: Dumbbell },
   { path: '/races', label: 'Carreras', icon: Trophy },
+  { path: '/calendar', label: 'Calendario', icon: CalendarDays, permission: 'calendar' },
   { path: '/maintenance', label: 'Mantenimiento', icon: Wrench, alerts: true },
   { path: '/telemetry', label: 'Telemetría', icon: Activity },
   { path: '/circuits', label: 'Circuitos', icon: Map },

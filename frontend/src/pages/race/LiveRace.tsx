@@ -1,6 +1,6 @@
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, Play, Pause, RefreshCw, AlertTriangle, Plus, CheckCircle } from 'lucide-react'
+import { ChevronLeft, Play, Pause, RefreshCw, AlertTriangle, Plus, CheckCircle, Star } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
@@ -18,6 +18,9 @@ export default function LiveRace() {
   const [incidentDesc, setIncidentDesc] = useState('')
   const [incidentType, setIncidentType] = useState<'technical' | 'strategic' | 'pilot' | 'other'>('technical')
   const [selectedVehicleForIncident, setSelectedVehicleForIncident] = useState('')
+  const [stintRatingModal, setStintRatingModal] = useState<{ vehicleId: string; pilotId: string; pilotName: string } | null>(null)
+  const [stintScore, setStintScore] = useState(7)
+  const [stintNotes, setStintNotes] = useState('')
 
   const { data: race } = useQuery({ queryKey: ['race', id], queryFn: () => raceApi.getEvent(id!) })
   const { data: strategies = [] } = useQuery({ queryKey: ['race-strategies', id], queryFn: () => raceApi.getStrategies(id!), enabled: !!id })
@@ -87,6 +90,33 @@ export default function LiveRace() {
     })
     setIncidentModal(false)
     setIncidentDesc('')
+  }
+
+  const handleConfirmStintChange = (vehicleId: string, pilotId: string) => {
+    const pilotName = getPilotName(pilotId)
+    setStintScore(7)
+    setStintNotes('')
+    setStintRatingModal({ vehicleId, pilotId, pilotName })
+  }
+
+  const handleSaveStintRating = async () => {
+    if (!stintRatingModal) return
+    try {
+      await pilotsApi.addStintRating(stintRatingModal.pilotId, {
+        stintScore,
+        notes: stintNotes || undefined,
+        raceId: id,
+        sessionDate: new Date().toISOString(),
+      })
+    } catch { /* silent — save best effort */ }
+    advanceStint(stintRatingModal.vehicleId)
+    setStintRatingModal(null)
+  }
+
+  const handleSkipStintRating = () => {
+    if (!stintRatingModal) return
+    advanceStint(stintRatingModal.vehicleId)
+    setStintRatingModal(null)
   }
 
   const getPilotName = (pilotId: string) => pilots.find(p => p.id === pilotId)?.fullName ?? pilotId
@@ -220,7 +250,7 @@ export default function LiveRace() {
                     )}
 
                     <button
-                      onClick={() => advanceStint(strategy.vehicleId)}
+                      onClick={() => handleConfirmStintChange(strategy.vehicleId, currentStint.pilotId)}
                       className="w-full btn-secondary text-sm py-1.5 flex items-center justify-center gap-1"
                     >
                       <CheckCircle className="w-4 h-4 text-success" /> Confirmar cambio de piloto
@@ -262,6 +292,63 @@ export default function LiveRace() {
           </CardContent>
         </Card>
       )}
+
+      {/* Stint Rating Modal */}
+      <Modal
+        isOpen={!!stintRatingModal}
+        onClose={handleSkipStintRating}
+        title="Valorar piloto"
+        footer={
+          <>
+            <button onClick={handleSkipStintRating} className="btn-secondary text-sm">Saltar valoración</button>
+            <button onClick={handleSaveStintRating} className="btn-primary text-sm flex items-center gap-1">
+              <CheckCircle className="w-4 h-4" /> Guardar y continuar
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <p className="text-smc-muted text-sm">
+            Rendimiento de <span className="text-white font-semibold">{stintRatingModal?.pilotName}</span> en este stint
+          </p>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">Puntuación</label>
+              <span className="text-2xl font-bold text-primary">{stintScore}<span className="text-sm text-smc-muted">/10</span></span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-smc-muted">1</span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={stintScore}
+                onChange={e => setStintScore(Number(e.target.value))}
+                className="flex-1 accent-primary"
+              />
+              <span className="text-xs text-smc-muted">10</span>
+            </div>
+            <div className="flex justify-center gap-1 mt-2">
+              {Array.from({ length: 10 }, (_, i) => (
+                <Star
+                  key={i}
+                  className={`w-4 h-4 ${i < stintScore ? 'text-warning fill-warning' : 'text-smc-border'}`}
+                />
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="label">Notas (opcional)</label>
+            <textarea
+              className="input-field resize-none"
+              rows={2}
+              placeholder="Observaciones del stint..."
+              value={stintNotes}
+              onChange={e => setStintNotes(e.target.value)}
+            />
+          </div>
+        </div>
+      </Modal>
 
       {/* Incident Modal */}
       <Modal

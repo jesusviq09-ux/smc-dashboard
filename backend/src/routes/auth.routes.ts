@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
-import { User } from '../models/index'
+import { User, PasswordResetToken } from '../models/index'
+import { sendPasswordResetEmail } from '../utils/mailer'
 
 const router = Router()
 const JWT_SECRET = process.env.JWT_SECRET || 'smc-dashboard-secret-change-in-prod'
@@ -110,6 +111,53 @@ router.get('/me', async (req: Request, res: Response) => {
     res.json({ user: buildUserPayload(user) })
   } catch {
     res.status(401).json({ error: 'Token inválido o expirado' })
+  }
+})
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body
+    // Respond 200 always to not reveal whether email exists
+    if (!email) return res.json({ ok: true })
+
+    const user = await User.findOne({ where: { email: email.toLowerCase() } })
+    if (user) {
+      const token = require('crypto').randomUUID() as string
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000) // 1 hour
+      await PasswordResetToken.create({ userId: user.id, token, expiresAt, used: false })
+      const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:5173'
+      const resetUrl = `${frontendUrl}/reset-password?token=${token}`
+      sendPasswordResetEmail(user.email, resetUrl).catch(console.error)
+    }
+    res.json({ ok: true })
+  } catch (err: any) {
+    console.error('POST /auth/forgot-password error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req: Request, res: Response) => {
+  try {
+    const { token, newPassword } = req.body
+    if (!token || !newPassword) return res.status(400).json({ error: 'Token y contraseña requeridos' })
+    if (newPassword.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' })
+
+    const resetToken = await PasswordResetToken.findOne({ where: { token } })
+    if (!resetToken || resetToken.used) return res.status(400).json({ error: 'Token inválido o ya utilizado' })
+    if (new Date() > resetToken.expiresAt) return res.status(400).json({ error: 'El enlace ha expirado. Solicita uno nuevo.' })
+
+    const user = await User.findByPk(resetToken.userId)
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' })
+
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await user.update({ passwordHash })
+    await resetToken.update({ used: true })
+    res.json({ ok: true })
+  } catch (err: any) {
+    console.error('POST /auth/reset-password error:', err.message)
+    res.status(500).json({ error: err.message })
   }
 })
 

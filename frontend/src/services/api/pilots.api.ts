@@ -120,4 +120,9 @@ export const pilotsApi = {
     })
     return data.url
   },
+
+  addStintRating: async (pilotId: string, payload: { stintScore: number; notes?: string; raceId?: string; sessionDate?: string }) => {
+    const { data } = await apiClient.post(`/pilots/${pilotId}/stint-rating`, payload)
+    return data
+  },
 }

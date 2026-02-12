@@ -7,6 +7,8 @@ import { getStoredToken } from '@/hooks/useAuth'
 // Auth pages (not lazy — must load fast)
 import Login from '@/pages/auth/Login'
 import Register from '@/pages/auth/Register'
+import ForgotPassword from '@/pages/auth/ForgotPassword'
+import ResetPassword from '@/pages/auth/ResetPassword'
 
 // Lazy-loaded pages for code splitting
 const Dashboard = lazy(() => import('@/pages/Dashboard'))
@@ -37,6 +39,7 @@ const ExportsIndex = lazy(() => import('@/pages/exports/ExportsIndex'))
 const AdminUsers = lazy(() => import('@/pages/admin/AdminUsers'))
 const AccountingIndex = lazy(() => import('@/pages/accounting/AccountingIndex'))
 const ProfilePage = lazy(() => import('@/pages/auth/ProfilePage'))
+const CalendarIndex = lazy(() => import('@/pages/calendar/CalendarIndex'))
 
 // Auth guard: redirects to /login if not authenticated
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -51,6 +54,8 @@ export default function App() {
       {/* Public routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       {/* Protected routes — wrapped in AppShell */}
       <Route path="/*" element={
@@ -109,6 +114,9 @@ export default function App() {
 
                 {/* Accounting */}
                 <Route path="/accounting" element={<AccountingIndex />} />
+
+                {/* Calendar */}
+                <Route path="/calendar" element={<CalendarIndex />} />
 
                 {/* Profile */}
                 <Route path="/profile" element={<ProfilePage />} />

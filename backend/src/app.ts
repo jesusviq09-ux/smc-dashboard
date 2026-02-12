@@ -19,6 +19,7 @@ import authRouter from './routes/auth.routes'
 import adminRouter from './routes/admin.routes'
 import noticesRouter from './routes/notices.routes'
 import accountingRouter from './routes/accounting.routes'
+import calendarRouter from './routes/calendar.routes'
 
 const app = express()
 
@@ -62,6 +63,7 @@ app.use('/api/auth', authRouter)
 app.use('/api/admin', adminRouter)
 app.use('/api/notices', noticesRouter)
 app.use('/api/accounting', accountingRouter)
+app.use('/api/calendar', calendarRouter)
 
 // Health check
 app.get('/api/health', (_req, res) => {

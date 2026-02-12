@@ -18,6 +18,7 @@ const SECTIONS = [
   { key: 'exports', label: 'Exportar' },
   { key: 'notices_write', label: 'Gestionar avisos' },
   { key: 'accounting', label: 'Contabilidad' },
+  { key: 'calendar', label: 'Calendario' },
 ]
 
 export default function AdminUsers() {
@@ -41,6 +42,7 @@ export default function AdminUsers() {
 
   const [pendingPerms, setPendingPerms] = useState<Record<string, string[]>>({})
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null)
+  const [roleSaveSuccess, setRoleSaveSuccess] = useState<string | null>(null)
 
   const permsMutation = useMutation({
     mutationFn: ({ userId, permissions }: { userId: string; permissions: string[] }) =>
@@ -57,7 +59,12 @@ export default function AdminUsers() {
   const roleMutation = useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: 'admin' | 'user' }) =>
       adminApi.updateRole(userId, role),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: (_, { userId }) => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] })
+      setRoleSaveSuccess(userId)
+      setTimeout(() => setRoleSaveSuccess(null), 2000)
+      refreshUserFromServer()
+    },
   })
 
   const emailMutation = useMutation({
@@ -114,6 +121,9 @@ export default function AdminUsers() {
                       <span className="badge-primary text-xs">Admin principal</span>
                     ) : (
                       <div className="flex items-center gap-2">
+                        {roleSaveSuccess === user.id && (
+                          <span className="text-xs text-success">✓ Rol actualizado</span>
+                        )}
                         <select
                           className="input-field text-xs py-1 px-2 w-28"
                           value={user.role}

@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ChevronLeft, Play, Settings, Zap, AlertCircle, Trash2 } from 'lucide-react'
+import { ChevronLeft, Play, Settings, Zap, AlertCircle, Trash2, Minus, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
@@ -52,6 +52,12 @@ export default function RaceDetail() {
       queryClient.invalidateQueries({ queryKey: ['race-events'] })
       navigate('/races')
     },
+  })
+
+  const updateStintMutation = useMutation({
+    mutationFn: ({ stintId, plannedDurationMinutes }: { stintId: string; plannedDurationMinutes: number }) =>
+      raceApi.updateStint(stintId, { plannedDurationMinutes }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['race-strategies', id] }),
   })
 
   if (isLoading) return <div className="skeleton h-96 rounded-xl" />
@@ -258,7 +264,23 @@ export default function RaceDetail() {
                         <span className={`badge text-xs ${objectiveColors[stint.objective as keyof typeof objectiveColors]}`}>
                           {objectiveLabels[stint.objective as keyof typeof objectiveLabels]}
                         </span>
-                        <span className="text-xs text-smc-muted">{stint.plannedDurationMinutes} min</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => updateStintMutation.mutate({ stintId: stint.id, plannedDurationMinutes: Math.max(5, stint.plannedDurationMinutes - 5) })}
+                            className="w-6 h-6 rounded flex items-center justify-center hover:bg-smc-card text-smc-muted hover:text-white"
+                            title="-5 min"
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="text-xs text-white w-12 text-center">{stint.plannedDurationMinutes} min</span>
+                          <button
+                            onClick={() => updateStintMutation.mutate({ stintId: stint.id, plannedDurationMinutes: stint.plannedDurationMinutes + 5 })}
+                            className="w-6 h-6 rounded flex items-center justify-center hover:bg-smc-card text-smc-muted hover:text-white"
+                            title="+5 min"
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}

@@ -170,4 +170,17 @@ router.post('/:id/recommend', async (req: Request, res: Response) => {
   }
 })
 
+// PUT /races/strategies/stints/:id — ajustar duración u otros campos de un stint
+router.put('/strategies/stints/:id', async (req: Request, res: Response) => {
+  try {
+    const stint = await RaceStint.findByPk(req.params.id)
+    if (!stint) return res.status(404).json({ error: 'Stint no encontrado' })
+    await stint.update(req.body)
+    res.json(stint)
+  } catch (err: any) {
+    console.error('PUT /strategies/stints/:id error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 export default router
