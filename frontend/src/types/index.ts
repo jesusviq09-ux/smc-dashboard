@@ -280,6 +280,7 @@ export interface MaintenanceChecklist {
   items: ChecklistItem[]
   signedBy?: string
   completedAt?: string
+  maintenanceRecordId?: string  // ID del MaintenanceRecord en el backend (para borrado sincronizado)
 }
 
 export interface SparePart {

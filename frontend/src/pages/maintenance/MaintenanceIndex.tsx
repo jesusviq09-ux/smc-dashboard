@@ -33,6 +33,7 @@ const POST_RACE_ITEMS = [
 ]
 
 function ChecklistHistory({ vehicles }: { vehicles: Vehicle[] }) {
+  const qcHistory = useQueryClient()
   const [editChecklist, setEditChecklist] = useState<MaintenanceChecklist | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
   const [editChecked, setEditChecked] = useState<Record<string, boolean>>({})
@@ -75,7 +76,20 @@ function ChecklistHistory({ vehicles }: { vehicles: Vehicle[] }) {
   }
 
   const handleDelete = async (id: string) => {
+    // Recuperar el checklist antes de borrarlo para obtener el vínculo al backend
+    const checklist = await db.maintenanceChecklists.get(id)
+    // Borrar de IndexedDB local
     await db.maintenanceChecklists.delete(id)
+    // Borrar también el MaintenanceRecord del backend si tiene vínculo
+    if (checklist?.maintenanceRecordId) {
+      try {
+        await maintenanceApi.deleteRecord(checklist.maintenanceRecordId)
+        qcHistory.invalidateQueries({ queryKey: ['maintenance'] })
+        qcHistory.invalidateQueries({ queryKey: ['maintenance-alerts'] })
+      } catch {
+        // Silencioso — si el registro ya no existe en el backend, no bloquear
+      }
+    }
     setDeleteConfirmId(null)
   }
 

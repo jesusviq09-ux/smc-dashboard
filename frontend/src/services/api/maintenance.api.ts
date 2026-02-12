@@ -41,6 +41,11 @@ export const maintenanceApi = {
     return data
   },
 
+  deleteRecord: async (id: string): Promise<void> => {
+    await apiClient.delete(`/maintenance/${id}`)
+    await db.maintenanceRecords.delete(id)
+  },
+
   updateRecord: async (id: string, updates: Partial<MaintenanceRecord>): Promise<MaintenanceRecord> => {
     if (!navigator.onLine) {
       const existing = await db.maintenanceRecords.get(id)

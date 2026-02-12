@@ -49,9 +49,12 @@ export default function VehicleChecklist() {
     try {
       setSaveError(null)
 
+      // Generar id del checklist antes para poder enlazarlo después
+      const checklistId = crypto.randomUUID()
+
       // 1. Guardar en IndexedDB local (para offline y visualización local)
       await db.maintenanceChecklists.add({
-        id: crypto.randomUUID(),
+        id: checklistId,
         vehicleId: vehicleId!,
         type,
         date: signatureDate,
@@ -75,7 +78,7 @@ export default function VehicleChecklist() {
       ].filter(Boolean)
 
       try {
-        await maintenanceApi.createRecord({
+        const record = await maintenanceApi.createRecord({
           vehicleId: vehicleId!,
           type,
           date: signatureDate,
@@ -85,6 +88,8 @@ export default function VehicleChecklist() {
           completed: true,
           partsReplaced: [],
         })
+        // Guardar el vínculo para que al borrar el checklist se borre también el registro del backend
+        await db.maintenanceChecklists.update(checklistId, { maintenanceRecordId: record.id })
         qc.invalidateQueries({ queryKey: ['maintenance'] })
         qc.invalidateQueries({ queryKey: ['maintenance-alerts'] })
       } catch {
