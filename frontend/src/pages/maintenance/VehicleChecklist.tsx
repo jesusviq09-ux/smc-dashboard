@@ -3,7 +3,9 @@ import { useState } from 'react'
 import { CheckSquare, Square, Save } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { useQueryClient } from '@tanstack/react-query'
 import { db } from '@/services/indexeddb/db'
+import { maintenanceApi } from '@/services/api/maintenance.api'
 
 const PRE_RACE_ITEMS = [
   { id: 'tires', label: 'Presión y estado neumáticos', critical: true },
@@ -28,6 +30,7 @@ const POST_RACE_ITEMS = [
 
 export default function VehicleChecklist() {
   const { vehicleId } = useParams<{ vehicleId: string }>()
+  const qc = useQueryClient()
   const [type, setType] = useState<'pre_race' | 'post_race'>('pre_race')
   const [checked, setChecked] = useState<Record<string, boolean>>({})
   const [signedBy, setSignedBy] = useState('')
@@ -45,6 +48,8 @@ export default function VehicleChecklist() {
   const handleSave = async () => {
     try {
       setSaveError(null)
+
+      // 1. Guardar en IndexedDB local (para offline y visualización local)
       await db.maintenanceChecklists.add({
         id: crypto.randomUUID(),
         vehicleId: vehicleId!,
@@ -60,6 +65,32 @@ export default function VehicleChecklist() {
         signedBy: `${signedBy}${signatureText ? ` — Firma: ${signatureText}` : ''}`,
         completedAt: new Date().toISOString(),
       })
+
+      // 2. Guardar en el backend para que aparezca en el historial compartido
+      const checkedCount = items.filter(i => checked[i.id]).length
+      const uncheckedCritical = items.filter(i => i.critical && !checked[i.id]).map(i => i.label)
+      const notesParts = [
+        signatureText ? `Firma: ${signatureText}` : '',
+        uncheckedCritical.length > 0 ? `Ítems críticos sin completar: ${uncheckedCritical.join(', ')}` : '',
+      ].filter(Boolean)
+
+      try {
+        await maintenanceApi.createRecord({
+          vehicleId: vehicleId!,
+          type,
+          date: signatureDate,
+          description: `Checklist ${type === 'pre_race' ? 'pre-carrera' : 'post-carrera'} — ${checkedCount}/${items.length} ítems OK`,
+          technicianName: signedBy,
+          notes: notesParts.length > 0 ? notesParts.join(' | ') : undefined,
+          completed: true,
+          partsReplaced: [],
+        })
+        qc.invalidateQueries({ queryKey: ['maintenance'] })
+        qc.invalidateQueries({ queryKey: ['maintenance-alerts'] })
+      } catch {
+        // Silencioso — el guardado local ya fue exitoso; el backend fallará solo si hay problema de red
+      }
+
       setSaved(true)
       setTimeout(() => setSaved(false), 3000)
     } catch (err: any) {

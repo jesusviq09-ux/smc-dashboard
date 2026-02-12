@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ShieldCheck, ShieldOff, Save, Users, Mail, MailX } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/Card'
 import { adminApi, type AdminUser } from '@/services/api/admin.api'
-import { getStoredUser } from '@/hooks/useAuth'
+import { getStoredUser, refreshUserFromServer } from '@/hooks/useAuth'
 
 const SECTIONS = [
   { key: 'dashboard', label: 'Dashboard' },
@@ -50,6 +50,7 @@ export default function AdminUsers() {
       setSaveSuccess(userId)
       setTimeout(() => setSaveSuccess(null), 2000)
       setPendingPerms(p => { const n = { ...p }; delete n[userId]; return n })
+      refreshUserFromServer()
     },
   })
 

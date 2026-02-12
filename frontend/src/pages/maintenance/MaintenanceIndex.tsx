@@ -217,7 +217,7 @@ export default function MaintenanceIndex() {
   const [form, setForm] = useState({
     vehicleId: 'smc01', type: 'preventive' as MaintenanceType,
     date: new Date().toISOString().split('T')[0],
-    description: '', nextServiceDate: '', technicianName: '', notes: '',
+    description: '', nextServiceDate: '', technicianName: '', signatureText: '', notes: '',
   })
 
   const vehicles = useLiveQuery(() => db.vehicles.toArray(), [])
@@ -233,7 +233,14 @@ export default function MaintenanceIndex() {
   })
 
   const createMutation = useMutation({
-    mutationFn: () => maintenanceApi.createRecord({ ...form, completed: false, partsReplaced: [] }),
+    mutationFn: () => maintenanceApi.createRecord({
+      ...form,
+      technicianName: form.technicianName
+        ? `${form.technicianName}${form.signatureText ? ` — Firma: ${form.signatureText}` : ''}`
+        : form.technicianName,
+      completed: false,
+      partsReplaced: [],
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['maintenance'] })
       queryClient.invalidateQueries({ queryKey: ['maintenance-alerts'] })
@@ -408,10 +415,18 @@ export default function MaintenanceIndex() {
             <textarea className="input-field resize-none" rows={2} value={form.description}
               onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
           </div>
-          <div>
-            <label className="label">Técnico</label>
-            <input type="text" className="input-field" value={form.technicianName}
-              onChange={e => setForm(f => ({ ...f, technicianName: e.target.value }))} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label">Técnico</label>
+              <input type="text" className="input-field" placeholder="Nombre y apellidos" value={form.technicianName}
+                onChange={e => setForm(f => ({ ...f, technicianName: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Firma</label>
+              <input type="text" className="input-field italic font-serif" placeholder="Firma o iniciales..."
+                value={form.signatureText}
+                onChange={e => setForm(f => ({ ...f, signatureText: e.target.value }))} />
+            </div>
           </div>
         </div>
       </Modal>
