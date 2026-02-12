@@ -267,6 +267,17 @@ export default function MaintenanceIndex() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['maintenance'] }),
   })
 
+  const [deleteRecordConfirmId, setDeleteRecordConfirmId] = useState<string | null>(null)
+
+  const deleteRecordMutation = useMutation({
+    mutationFn: (id: string) => maintenanceApi.deleteRecord(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['maintenance'] })
+      queryClient.invalidateQueries({ queryKey: ['maintenance-alerts'] })
+      setDeleteRecordConfirmId(null)
+    },
+  })
+
   return (
     <div className="space-y-6">
       <div className="page-header">
@@ -369,14 +380,23 @@ export default function MaintenanceIndex() {
                       )}
                     </div>
                   </div>
-                  {!record.completed && (
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    {!record.completed && (
+                      <button
+                        onClick={() => completeMutation.mutate(record.id)}
+                        className="text-xs text-success hover:underline flex items-center gap-1"
+                      >
+                        <CheckCircle className="w-3 h-3" /> Completar
+                      </button>
+                    )}
                     <button
-                      onClick={() => completeMutation.mutate(record.id)}
-                      className="flex-shrink-0 text-xs text-success hover:underline flex items-center gap-1"
+                      onClick={() => setDeleteRecordConfirmId(record.id)}
+                      className="p-1.5 rounded-lg hover:bg-smc-card text-smc-muted hover:text-danger"
+                      title="Eliminar registro"
                     >
-                      <CheckCircle className="w-3 h-3" /> Completar
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                  )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -386,6 +406,27 @@ export default function MaintenanceIndex() {
 
       {/* Signed Checklists from IndexedDB */}
       <ChecklistHistory vehicles={vehicles ?? []} />
+
+      {/* Delete record confirm modal */}
+      {deleteRecordConfirmId && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card rounded-xl p-6 max-w-sm w-full space-y-4 border border-smc-border">
+            <h3 className="font-semibold text-smc-text">¿Eliminar registro?</h3>
+            <p className="text-sm text-smc-muted">Esta acción eliminará el registro del historial de mantenimiento y no se puede deshacer.</p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeleteRecordConfirmId(null)} className="btn-secondary">Cancelar</button>
+              <button
+                onClick={() => deleteRecordMutation.mutate(deleteRecordConfirmId)}
+                disabled={deleteRecordMutation.isPending}
+                className="btn-danger flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                {deleteRecordMutation.isPending ? 'Eliminando...' : 'Eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Modal */}
       <Modal
