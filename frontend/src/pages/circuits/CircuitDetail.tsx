@@ -79,6 +79,42 @@ export default function CircuitDetail() {
         ))}
       </div>
 
+      {/* Performance parameters */}
+      {(circuit.demandingTechnical !== undefined || circuit.energyConsumption !== undefined) && (
+        <Card title="Parámetros de rendimiento">
+          <CardContent>
+            <div className="space-y-3">
+              {([
+                { key: 'demandingTechnical', label: 'Exigencia técnica', pilot: 'Pilotaje' },
+                { key: 'demandingPhysical', label: 'Exigencia física', pilot: 'Experiencia' },
+                { key: 'energyConsumption', label: 'Consumo energético', pilot: 'Gest. Energética' },
+                { key: 'overtakingDifficulty', label: 'Dif. de adelantamiento', pilot: 'Adaptación' },
+                { key: 'gripLevel', label: 'Nivel de grip', pilot: 'Pilotaje (bajo grip)' },
+              ] as const).map(({ key, label, pilot }) => {
+                const val = (circuit as any)[key] ?? 5
+                const pct = (val / 10) * 100
+                const color = val >= 8 ? '#ef4444' : val >= 6 ? '#f59e0b' : val >= 4 ? '#8B1A2E' : '#22c55e'
+                return (
+                  <div key={key}>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <span className="text-smc-text font-medium">{label}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-smc-muted">→ {pilot}</span>
+                        <span className="font-bold text-white">{val}/10</span>
+                      </div>
+                    </div>
+                    <div className="h-2 bg-smc-darker rounded-full overflow-hidden">
+                      <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <p className="text-xs text-smc-muted mt-3">Estos parámetros se usan para calcular la compatibilidad piloto-circuito en la estrategia de carrera.</p>
+          </CardContent>
+        </Card>
+      )}
+
       {circuit.notes && (
         <Card title="Notas del circuito">
           <CardContent>

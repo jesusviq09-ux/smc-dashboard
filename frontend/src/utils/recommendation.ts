@@ -2,7 +2,7 @@ import {
   Pilot, Vehicle, Circuit, RaceCategory, RacePriorityMode,
   StintObjective, RecommendationOutput
 } from '@/types'
-import { calculateWeightedScore, calculateVehicleAffinity } from './pilotScore'
+import { calculateWeightedScore, calculateVehicleAffinity, calculateCircuitAffinity } from './pilotScore'
 import { ScoreConfig } from './pilotScore'
 
 interface RecommendationInput {
@@ -59,13 +59,11 @@ export function generateRecommendation(input: RecommendationInput): Recommendati
     warnings.push(`Solo ${eligiblePilots.length} piloto(s) elegible(s). Se necesitan al menos 2.`)
   }
 
-  // Step 2: Score each pilot per vehicle
+  // Step 2: Score each pilot per vehicle (including circuit affinity)
   const scoredPilots: ScoredPilot[] = eligiblePilots.map(pilot => {
-    const finalScore = calculateWeightedScore(
-      pilot.ratings,
-      pilot.weightKg,
-      scoreConfig
-    )
+    const baseScore = calculateWeightedScore(pilot.ratings, pilot.weightKg, scoreConfig)
+    const circuitBonus = input.circuit ? calculateCircuitAffinity(pilot, input.circuit) : 0
+    const finalScore = Math.round((baseScore + circuitBonus) * 100) / 100
     const vehicleAffinity: Record<string, number> = {}
     for (const vehicle of vehicles) {
       vehicleAffinity[vehicle.id] = calculateVehicleAffinity(pilot.weightKg, vehicle.id)
@@ -82,17 +80,24 @@ export function generateRecommendation(input: RecommendationInput): Recommendati
   // Sort by score descending
   scoredPilots.sort((a, b) => b.finalScore - a.finalScore)
 
-  // Step 3: Assign stints per vehicle
+  // Step 3: Assign stints per vehicle — track used pilots globally to avoid same assignment
+  const globalUsedPilotIds = new Set<string>()
+
   const vehicleAssignments = vehicles.map(vehicle => {
-    return assignStintsForVehicle({
+    const assignment = assignStintsForVehicle({
       vehicle,
       scoredPilots,
+      globalUsedPilotIds,
       durationMinutes,
       minStints,
       priorityMode,
       category,
       warnings,
+      circuit: input.circuit,
     })
+    // Mark pilots as used for subsequent vehicles
+    assignment.stints.forEach(s => globalUsedPilotIds.add(s.pilot.id))
+    return assignment
   })
 
   return {
@@ -104,40 +109,57 @@ export function generateRecommendation(input: RecommendationInput): Recommendati
 interface VehicleAssignmentInput {
   vehicle: Vehicle
   scoredPilots: ScoredPilot[]
+  globalUsedPilotIds: Set<string>
   durationMinutes: number
   minStints: number
   priorityMode: RacePriorityMode
   category: RaceCategory
   warnings: string[]
+  circuit?: Circuit
 }
 
 function assignStintsForVehicle({
   vehicle,
   scoredPilots,
+  globalUsedPilotIds,
   durationMinutes,
   minStints,
   priorityMode,
   warnings,
+  circuit,
 }: VehicleAssignmentInput) {
   const stintDurationMinutes = Math.floor(durationMinutes / minStints)
-  const usedPilotIds = new Set<string>()
 
-  // Score pilots with vehicle affinity
-  const vehicleScoredPilots = scoredPilots
+  // Score pilots with vehicle affinity, sorted best first
+  const allVehiclePilots = scoredPilots
     .map(p => ({
       ...p,
       totalScore: p.finalScore + (p.vehicleAffinity[vehicle.id] ?? 0),
     }))
     .sort((a, b) => b.totalScore - a.totalScore)
 
+  // Prefer pilots not yet used by other vehicles
+  const availablePilots = allVehiclePilots.filter(p => !globalUsedPilotIds.has(p.id))
+  const fallbackPilots = allVehiclePilots.filter(p => globalUsedPilotIds.has(p.id))
+
+  // Use available pilots first; if not enough, supplement with fallbacks (with warning)
+  const vehicleScoredPilots = availablePilots.length >= minStints
+    ? availablePilots
+    : [
+        ...availablePilots,
+        ...fallbackPilots.filter(p => !availablePilots.some(a => a.id === p.id)),
+      ]
+
+  if (availablePilots.length < minStints && availablePilots.length < allVehiclePilots.length) {
+    warnings.push(`Pocos pilotos disponibles para ${vehicle.name}. Algunos pilotos se asignan a varios vehículos.`)
+  }
+
   // Select pilots based on priority mode
   let orderedPilots: typeof vehicleScoredPilots = []
 
   if (priorityMode === 'WIN') {
-    // Best pilots in last and first stints
     orderedPilots = selectForWin(vehicleScoredPilots, minStints)
   } else if (priorityMode === 'FINISH') {
-    // Most consistent pilots
     const consistentFirst = [...vehicleScoredPilots].sort((a, b) =>
       (b.ratings.consistency + b.ratings.energyManagement) -
       (a.ratings.consistency + a.ratings.energyManagement)
@@ -155,7 +177,6 @@ function assignStintsForVehicle({
     if (available) {
       orderedPilots.push(available)
     } else {
-      // Reuse best pilot if needed
       orderedPilots.push(vehicleScoredPilots[0])
       warnings.push(`No hay suficientes pilotos para ${vehicle.name}. Se reutiliza un piloto.`)
     }
@@ -165,9 +186,7 @@ function assignStintsForVehicle({
   const stints = orderedPilots.slice(0, minStints).map((pilot, index) => {
     const stintNumber = index + 1
     const objective = determineObjective(stintNumber, minStints)
-    const justification = buildJustification(pilot, vehicle, stintNumber, minStints, priorityMode)
-
-    usedPilotIds.add(pilot.id)
+    const justification = buildJustification(pilot, vehicle, stintNumber, minStints, priorityMode, circuit)
 
     return {
       stintNumber,
@@ -234,7 +253,8 @@ function buildJustification(
   vehicle: Vehicle,
   stintNumber: number,
   totalStints: number,
-  priorityMode: RacePriorityMode
+  priorityMode: RacePriorityMode,
+  circuit?: Circuit
 ): string {
   const parts: string[] = []
   const affinityBonus = pilot.vehicleAffinity[vehicle.id] ?? 0
@@ -251,19 +271,29 @@ function buildJustification(
   // Score reason
   parts.push(`Puntuación: ${pilot.totalScore.toFixed(1)}/10`)
 
+  // Circuit compatibility hints
+  if (circuit) {
+    if ((circuit.demandingTechnical ?? 5) >= 7 && pilot.ratings.driving >= 7) {
+      parts.push(`Buen pilotaje para circuito técnico (${pilot.ratings.driving}/10)`)
+    }
+    if ((circuit.energyConsumption ?? 5) >= 7 && pilot.ratings.energyManagement >= 7) {
+      parts.push(`Gestión energética adecuada para este circuito (${pilot.ratings.energyManagement}/10)`)
+    }
+    if ((circuit.demandingPhysical ?? 5) >= 7 && pilot.ratings.experience >= 7) {
+      parts.push(`Experiencia para circuito físicamente exigente (${pilot.ratings.experience}/10)`)
+    }
+  } else {
+    if (pilot.ratings.energyManagement >= 8) {
+      parts.push(`Gestión energética destacada (${pilot.ratings.energyManagement}/10)`)
+    }
+    if (pilot.ratings.consistency >= 8) {
+      parts.push(`Alta consistencia (${pilot.ratings.consistency}/10)`)
+    }
+  }
+
   // Weight reason for SMC 02 EVO
   if (affinityBonus > 0) {
     parts.push(`Bonificación por peso (${pilot.weightKg}kg): +${affinityBonus.toFixed(2)} en ${vehicle.name}`)
-  }
-
-  // Energy management highlight
-  if (pilot.ratings.energyManagement >= 8) {
-    parts.push(`Gestión energética destacada (${pilot.ratings.energyManagement}/10)`)
-  }
-
-  // Consistency highlight
-  if (pilot.ratings.consistency >= 8) {
-    parts.push(`Alta consistencia (${pilot.ratings.consistency}/10)`)
   }
 
   return parts.join(' · ')

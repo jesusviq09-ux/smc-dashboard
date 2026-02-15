@@ -154,6 +154,8 @@ export class Circuit extends Model {
   declare lengthMeters: number; declare asphaltType?: string; declare elevationMeters?: number
   declare numberOfCurves?: number; declare sectors: object[]; declare photo?: string
   declare mapUrl?: string; declare notes?: string; declare restrictions?: string[]
+  declare demandingTechnical?: number; declare demandingPhysical?: number
+  declare energyConsumption?: number; declare overtakingDifficulty?: number; declare gripLevel?: number
 }
 Circuit.init({
   id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
@@ -169,6 +171,11 @@ Circuit.init({
   mapUrl: DataTypes.STRING,
   notes: DataTypes.TEXT,
   restrictions: { type: DataTypes.ARRAY(DataTypes.STRING), defaultValue: [] },
+  demandingTechnical: { type: DataTypes.FLOAT, defaultValue: 5 },
+  demandingPhysical: { type: DataTypes.FLOAT, defaultValue: 5 },
+  energyConsumption: { type: DataTypes.FLOAT, defaultValue: 5 },
+  overtakingDifficulty: { type: DataTypes.FLOAT, defaultValue: 5 },
+  gripLevel: { type: DataTypes.FLOAT, defaultValue: 5 },
 }, { sequelize, modelName: 'Circuit', tableName: 'circuits', timestamps: true })
 
 // ============================================================

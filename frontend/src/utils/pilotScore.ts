@@ -1,4 +1,4 @@
-import { PilotRatings } from '@/types'
+import { PilotRatings, Pilot, Circuit } from '@/types'
 
 export interface ScoreConfig {
   penaltyThresholdKg: number  // Default: 50
@@ -103,4 +103,26 @@ export const RATING_WEIGHTS: Record<keyof PilotRatings, number> = {
   teamwork: 0.10,
   consistency: 0.10,
   adaptation: 0.05,
+}
+
+/**
+ * Calculate circuit affinity score for a pilot.
+ * Compares circuit demands with pilot strengths to produce a compatibility bonus (0–2 pts).
+ */
+export function calculateCircuitAffinity(pilot: Pilot, circuit: Circuit): number {
+  const r = pilot.ratings
+  const tech = ((circuit.demandingTechnical ?? 5) / 10) * r.driving * 0.30
+  const phys = ((circuit.demandingPhysical ?? 5) / 10) * r.experience * 0.20
+  const energy = ((circuit.energyConsumption ?? 5) / 10) * r.energyManagement * 0.30
+  const overtake = ((circuit.overtakingDifficulty ?? 5) / 10) * r.adaptation * 0.10
+  const grip = ((10 - (circuit.gripLevel ?? 5)) / 10) * r.driving * 0.10 // Bajo grip → más exigente
+  return Math.round(((tech + phys + energy + overtake + grip) / 5) * 20) / 100
+}
+
+export const CIRCUIT_PARAM_LABELS: Record<string, string> = {
+  demandingTechnical: 'Exigencia técnica',
+  demandingPhysical: 'Exigencia física',
+  energyConsumption: 'Consumo energético',
+  overtakingDifficulty: 'Dif. de adelantamiento',
+  gripLevel: 'Nivel de grip',
 }

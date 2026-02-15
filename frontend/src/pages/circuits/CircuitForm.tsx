@@ -18,6 +18,8 @@ export default function CircuitForm() {
     name: '', city: '', country: '', lengthMeters: 1000,
     numberOfCurves: 8, elevationMeters: 0, asphaltType: 'smooth',
     sectors: 3, notes: '',
+    demandingTechnical: 5, demandingPhysical: 5,
+    energyConsumption: 5, overtakingDifficulty: 5, gripLevel: 5,
   })
   const [loading, setLoading] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -35,17 +37,27 @@ export default function CircuitForm() {
           asphaltType: c.asphaltType ?? 'smooth',
           sectors: Array.isArray(c.sectors) ? c.sectors.length : (c.sectors as any) ?? 3,
           notes: c.notes ?? '',
+          demandingTechnical: c.demandingTechnical ?? 5,
+          demandingPhysical: c.demandingPhysical ?? 5,
+          energyConsumption: c.energyConsumption ?? 5,
+          overtakingDifficulty: c.overtakingDifficulty ?? 5,
+          gripLevel: c.gripLevel ?? 5,
         })
       })
     }
   }, [id, isEditing])
 
+  const NUMERIC_FIELDS = ['lengthMeters', 'numberOfCurves', 'elevationMeters', 'sectors',
+    'demandingTechnical', 'demandingPhysical', 'energyConsumption', 'overtakingDifficulty', 'gripLevel']
+
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const value = ['lengthMeters', 'numberOfCurves', 'elevationMeters', 'sectors'].includes(field)
+    const value = NUMERIC_FIELDS.includes(field)
       ? parseFloat(e.target.value) || 0
       : e.target.value
     setForm(f => ({ ...f, [field]: value }))
   }
+
+  const setNum = (field: string, value: number) => setForm(f => ({ ...f, [field]: value }))
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -125,6 +137,56 @@ export default function CircuitForm() {
                 <label className="form-label">Sectores</label>
                 <input type="number" className="input-field" value={form.sectors} onChange={set('sectors')} min={1} max={10} />
               </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card title="Parámetros de rendimiento">
+          <CardContent>
+            <p className="text-xs text-smc-muted mb-4">
+              Evalúa la exigencia del circuito (1 = muy bajo, 10 = muy alto). Se usarán para calcular la estrategia óptima según las fortalezas de cada piloto.
+            </p>
+            <div className="space-y-4">
+              {([
+                { field: 'demandingTechnical', label: 'Exigencia técnica', hint: 'Curvas rápidas, frenadas tardías, chicanes' },
+                { field: 'demandingPhysical', label: 'Exigencia física', hint: 'Fuerza lateral, resistencia del piloto' },
+                { field: 'energyConsumption', label: 'Consumo energético', hint: 'Cuánta energía consume el coche por vuelta' },
+                { field: 'overtakingDifficulty', label: 'Dificultad de adelantamiento', hint: 'Facilidad para adelantar en carrera' },
+                { field: 'gripLevel', label: 'Nivel de grip', hint: 'Adherencia del asfalto (10 = máximo grip)' },
+              ] as const).map(({ field, label, hint }) => {
+                const val = form[field as keyof typeof form] as number
+                return (
+                  <div key={field}>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-sm font-medium text-smc-text">{label}</label>
+                      <span className="text-lg font-bold text-primary w-8 text-right">{val}</span>
+                    </div>
+                    <p className="text-xs text-smc-muted mb-2">{hint}</p>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs text-smc-muted w-4">1</span>
+                      <input
+                        type="range"
+                        min={1}
+                        max={10}
+                        step={1}
+                        value={val}
+                        onChange={e => setNum(field, Number(e.target.value))}
+                        className="flex-1 accent-primary"
+                      />
+                      <span className="text-xs text-smc-muted w-4">10</span>
+                    </div>
+                    <div className="h-1.5 bg-smc-darker rounded-full mt-1 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${(val / 10) * 100}%`,
+                          background: val >= 8 ? 'var(--color-danger)' : val >= 6 ? 'var(--color-warning)' : val >= 4 ? 'var(--color-primary)' : 'var(--color-success)',
+                        }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </CardContent>
         </Card>

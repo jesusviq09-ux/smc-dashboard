@@ -320,6 +320,12 @@ export interface Circuit {
   notes?: string
   restrictions?: string[]
   createdAt: string
+  // Parámetros de rendimiento / exigencia del circuito (1-10)
+  demandingTechnical?: number    // Exigencia técnica
+  demandingPhysical?: number     // Exigencia física
+  energyConsumption?: number     // Consumo energético
+  overtakingDifficulty?: number  // Dificultad de adelantamiento
+  gripLevel?: number             // Nivel de grip
 }
 
 export interface CircuitRecord {
