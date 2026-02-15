@@ -5,13 +5,14 @@ import { calendarApi, CalendarEventItem } from '@/services/api/calendar.api'
 import { raceApi } from '@/services/api/race.api'
 import { trainingApi } from '@/services/api/training.api'
 import { maintenanceApi } from '@/services/api/maintenance.api'
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth, isSameDay, parseISO, isToday } from 'date-fns'
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth, isSameDay, parseISO, isToday, startOfDay } from 'date-fns'
 import { es } from 'date-fns/locale'
 
 type UnifiedEvent = {
   id: string
   title: string
   date: string
+  endDate?: string
   type: 'race' | 'training' | 'maintenance' | 'custom'
 }
 
@@ -65,7 +66,7 @@ export default function CalendarIndex() {
     ...races.map(r => ({ id: r.id, title: r.name, date: r.date, type: 'race' as const })),
     ...trainings.map(t => ({ id: t.id, title: `Entrenamiento`, date: t.date, type: 'training' as const })),
     ...(maintenanceRecords as any[]).map(m => ({ id: m.id, title: m.description || 'Mantenimiento', date: m.date, type: 'maintenance' as const })),
-    ...customEvents.map(e => ({ id: e.id, title: e.title, date: e.date, type: 'custom' as const })),
+    ...customEvents.map(e => ({ id: e.id, title: e.title, date: e.date, endDate: e.endDate, type: 'custom' as const })),
   ], [races, trainings, maintenanceRecords, customEvents])
 
   // Build calendar grid
@@ -79,7 +80,18 @@ export default function CalendarIndex() {
   while (d <= gridEnd) { days.push(d); d = addDays(d, 1) }
 
   const getEventsForDay = (day: Date) =>
-    allEvents.filter(e => isSameDay(parseISO(e.date), day))
+    allEvents.filter(e => {
+      const start = startOfDay(parseISO(e.date))
+      if (!e.endDate) return isSameDay(start, day)
+      const end = startOfDay(parseISO(e.endDate))
+      const d = startOfDay(day)
+      return d >= start && d <= end
+    })
+
+  const isEventStart = (ev: UnifiedEvent, day: Date) => isSameDay(parseISO(ev.date), day)
+  const isEventEnd = (ev: UnifiedEvent, day: Date) =>
+    ev.endDate ? isSameDay(parseISO(ev.endDate), day) : isSameDay(parseISO(ev.date), day)
+  const isMultiDay = (ev: UnifiedEvent) => !!ev.endDate && ev.date !== ev.endDate
 
   const openCreateModal = (day: Date) => {
     setEditingEvent(null)
@@ -183,21 +195,36 @@ export default function CalendarIndex() {
                   {format(day, 'd')}
                 </div>
                 <div className="space-y-0.5">
-                  {events.slice(0, 3).map(ev => (
-                    <div
-                      key={ev.id}
-                      onClick={e => {
-                        e.stopPropagation()
-                        if (ev.type === 'custom') {
-                          const full = customEvents.find(c => c.id === ev.id)
-                          if (full) openEditModal(full)
-                        }
-                      }}
-                      className={`text-xs px-1 py-0.5 rounded truncate ${TYPE_STYLES[ev.type]} ${ev.type === 'custom' ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
-                    >
-                      {TYPE_LABELS[ev.type]} {ev.title}
-                    </div>
-                  ))}
+                  {events.slice(0, 3).map(ev => {
+                    const multi = isMultiDay(ev)
+                    const start = isEventStart(ev, day)
+                    const end = isEventEnd(ev, day)
+                    const middle = multi && !start && !end
+
+                    // Border radius: full for single-day, left only for start, none for middle, right only for end
+                    const radius = !multi ? 'rounded' : start ? 'rounded-l rounded-r-none' : end ? 'rounded-r rounded-l-none' : 'rounded-none'
+                    // Padding: reduce side padding for multi-day continuation
+                    const px = middle || (multi && end) ? 'px-0' : 'px-1'
+                    // Show title only on start (or single-day)
+                    const showTitle = !multi || start
+
+                    return (
+                      <div
+                        key={ev.id}
+                        onClick={e => {
+                          e.stopPropagation()
+                          if (ev.type === 'custom') {
+                            const full = customEvents.find(c => c.id === ev.id)
+                            if (full) openEditModal(full)
+                          }
+                        }}
+                        className={`text-xs py-0.5 truncate ${radius} ${px} ${TYPE_STYLES[ev.type]} ${ev.type === 'custom' ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                        title={ev.title}
+                      >
+                        {showTitle ? <>{TYPE_LABELS[ev.type]} {ev.title}</> : <>&nbsp;</>}
+                      </div>
+                    )
+                  })}
                   {events.length > 3 && (
                     <div className="text-xs text-smc-muted px-1">+{events.length - 3} más</div>
                   )}
