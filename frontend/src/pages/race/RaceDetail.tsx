@@ -1,12 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ChevronLeft, Play, Settings, Zap, AlertCircle, Trash2, Minus, Plus } from 'lucide-react'
+import { ChevronLeft, Play, Zap, AlertCircle, Trash2, Minus, Plus } from 'lucide-react'
 import { useState } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
 import { circuitsApi } from '@/services/api/circuits.api'
 import { Card, CardContent } from '@/components/ui/Card'
 import { generateRecommendation } from '@/utils/recommendation'
+import ManualStrategyBuilder from './ManualStrategyBuilder'
 import { db } from '@/services/indexeddb/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
@@ -26,6 +27,7 @@ export default function RaceDetail() {
   const [recommendation, setRecommendation] = useState<ReturnType<typeof generateRecommendation> | null>(null)
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [strategyTab, setStrategyTab] = useState<'auto' | 'manual'>('auto')
   const queryClient = useQueryClient()
 
   const { data: race, isLoading } = useQuery({
@@ -173,85 +175,119 @@ export default function RaceDetail() {
       </div>
 
       {/* Strategy Generator */}
-      <Card title="Generador de estrategia" subtitle="Basado en puntuaciones y disponibilidad de pilotos">
+      <Card title="Estrategia">
         <CardContent className="space-y-4">
-          <div>
-            <label className="label">Modo de prioridad</label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {PRIORITY_MODES.map(mode => (
-                <button
-                  key={mode.value}
-                  onClick={() => setPriorityMode(mode.value)}
-                  type="button"
-                  className={`p-3 rounded-xl border text-left transition-colors ${
-                    priorityMode === mode.value
-                      ? 'border-primary bg-primary/10'
-                      : 'border-smc-border hover:border-primary/30'
-                  }`}
-                >
-                  <p className="font-medium text-white text-sm">{mode.label}</p>
-                  <p className="text-xs text-smc-muted mt-0.5">{mode.desc}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex gap-3">
-            <button onClick={handleGenerateStrategy} className="btn-primary flex items-center gap-2">
-              <Zap className="w-4 h-4" /> Generar estrategia óptima
-            </button>
-            {recommendation && (
-              <button onClick={handleSaveStrategy} disabled={saving} className="btn-secondary">
-                {saving ? 'Guardando...' : 'Guardar estrategia'}
+          {/* Tabs */}
+          <div className="flex border-b border-smc-border -mx-4 px-4">
+            {([['auto', 'Automática'], ['manual', 'Manual']] as const).map(([tab, label]) => (
+              <button
+                key={tab}
+                onClick={() => setStrategyTab(tab)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                  strategyTab === tab
+                    ? 'border-primary text-primary'
+                    : 'border-transparent text-smc-muted hover:text-smc-text'
+                }`}
+              >
+                {label}
               </button>
-            )}
+            ))}
           </div>
 
-          {/* Recommendation output */}
-          {recommendation && (
+          {/* AUTO TAB */}
+          {strategyTab === 'auto' && (
             <div className="space-y-4">
-              {recommendation.warnings.length > 0 && (
-                <div className="bg-warning/10 border border-warning/30 rounded-lg p-3">
-                  {recommendation.warnings.map((w, i) => (
-                    <p key={i} className="text-warning text-sm flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 flex-shrink-0" /> {w}
-                    </p>
+              <p className="text-xs text-smc-muted">Basado en puntuaciones y disponibilidad de pilotos</p>
+              <div>
+                <label className="label">Modo de prioridad</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {PRIORITY_MODES.map(mode => (
+                    <button
+                      key={mode.value}
+                      onClick={() => setPriorityMode(mode.value)}
+                      type="button"
+                      className={`p-3 rounded-xl border text-left transition-colors ${
+                        priorityMode === mode.value
+                          ? 'border-primary bg-primary/10'
+                          : 'border-smc-border hover:border-primary/30'
+                      }`}
+                    >
+                      <p className="font-medium text-white text-sm">{mode.label}</p>
+                      <p className="text-xs text-smc-muted mt-0.5">{mode.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={handleGenerateStrategy} className="btn-primary flex items-center gap-2">
+                  <Zap className="w-4 h-4" /> Generar estrategia óptima
+                </button>
+                {recommendation && (
+                  <button onClick={handleSaveStrategy} disabled={saving} className="btn-secondary">
+                    {saving ? 'Guardando...' : 'Guardar estrategia'}
+                  </button>
+                )}
+              </div>
+
+              {recommendation && (
+                <div className="space-y-4">
+                  {recommendation.warnings.length > 0 && (
+                    <div className="bg-warning/10 border border-warning/30 rounded-lg p-3 space-y-1">
+                      {recommendation.warnings.map((w, i) => (
+                        <p key={i} className="text-warning text-sm flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 flex-shrink-0" /> {w}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+
+                  {recommendation.vehicleAssignments.map(assignment => (
+                    <div key={assignment.vehicle.id} className="border border-smc-border rounded-xl overflow-hidden">
+                      <div className="bg-smc-darker px-4 py-3 flex items-center justify-between">
+                        <h3 className="font-bold text-white">{assignment.vehicle.name}</h3>
+                        <div className="flex items-center gap-3 text-xs text-smc-muted">
+                          <span>{assignment.totalEnergyEstimateWh} Wh estimados</span>
+                          <span className={`badge ${assignment.finishProbability >= 0.8 ? 'badge-green' : assignment.finishProbability >= 0.6 ? 'badge-yellow' : 'badge-red'}`}>
+                            {(assignment.finishProbability * 100).toFixed(0)}% prob. finalizar
+                          </span>
+                        </div>
+                      </div>
+                      <div className="divide-y divide-smc-border">
+                        {assignment.stints.map(stint => (
+                          <div key={stint.stintNumber} className="px-4 py-3">
+                            <div className="flex items-center justify-between mb-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-smc-muted">Stint {stint.stintNumber}</span>
+                                <span className={`badge text-xs ${objectiveColors[stint.objective]}`}>
+                                  {objectiveLabels[stint.objective]}
+                                </span>
+                              </div>
+                              <span className="text-xs text-smc-muted">{stint.plannedDurationMinutes} min</span>
+                            </div>
+                            <p className="font-semibold text-white">{stint.pilot.fullName}</p>
+                            <p className="text-xs text-smc-muted mt-0.5">{stint.justification}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}
-
-              {recommendation.vehicleAssignments.map(assignment => (
-                <div key={assignment.vehicle.id} className="border border-smc-border rounded-xl overflow-hidden">
-                  <div className="bg-smc-darker px-4 py-3 flex items-center justify-between">
-                    <h3 className="font-bold text-white">{assignment.vehicle.name}</h3>
-                    <div className="flex items-center gap-3 text-xs text-smc-muted">
-                      <span>{assignment.totalEnergyEstimateWh} Wh estimados</span>
-                      <span className={`badge ${assignment.finishProbability >= 0.8 ? 'badge-green' : assignment.finishProbability >= 0.6 ? 'badge-yellow' : 'badge-red'}`}>
-                        {(assignment.finishProbability * 100).toFixed(0)}% prob. finalizar
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="divide-y divide-smc-border">
-                    {assignment.stints.map(stint => (
-                      <div key={stint.stintNumber} className="px-4 py-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-smc-muted">Stint {stint.stintNumber}</span>
-                            <span className={`badge text-xs ${objectiveColors[stint.objective]}`}>
-                              {objectiveLabels[stint.objective]}
-                            </span>
-                          </div>
-                          <span className="text-xs text-smc-muted">{stint.plannedDurationMinutes} min</span>
-                        </div>
-                        <p className="font-semibold text-white">{stint.pilot.fullName}</p>
-                        <p className="text-xs text-smc-muted mt-0.5">{stint.justification}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
             </div>
+          )}
+
+          {/* MANUAL TAB */}
+          {strategyTab === 'manual' && vehicles && pilots.length > 0 && (
+            <ManualStrategyBuilder
+              race={race}
+              vehicles={vehicles}
+              pilots={pilots}
+              onSaved={() => setStrategyTab('auto')}
+            />
+          )}
+          {strategyTab === 'manual' && (!vehicles || pilots.length === 0) && (
+            <p className="text-smc-muted text-sm">Cargando vehículos y pilotos...</p>
           )}
         </CardContent>
       </Card>

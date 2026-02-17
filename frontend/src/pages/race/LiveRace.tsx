@@ -1,6 +1,6 @@
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, Play, Pause, RefreshCw, AlertTriangle, Plus, CheckCircle, Star } from 'lucide-react'
+import { ChevronLeft, Play, Pause, RefreshCw, AlertTriangle, CheckCircle, Star, Clock } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
@@ -27,7 +27,7 @@ export default function LiveRace() {
   const { data: pilots = [] } = useQuery({ queryKey: ['pilots'], queryFn: pilotsApi.getAll })
   const vehicles = useLiveQuery(() => db.vehicles.toArray(), [])
 
-  const { liveRace, startRace, pauseRace, resumeRace, stopRace, addIncident, resolveIncident, advanceStint, getElapsed } = useRaceStore()
+  const { liveRace, startRace, pauseRace, resumeRace, stopRace, addIncident, resolveIncident, advanceStint, getElapsed, startStintLog, endStintLog } = useRaceStore()
   const category = race?.categories?.includes('F24') ? 'F24' : 'F24+'
   const durationSeconds = category === 'F24+' ? 60 * 60 : 90 * 60
 
@@ -69,6 +69,23 @@ export default function LiveRace() {
     } else {
       startRace(id!)
       timer.start()
+      // Register initial stint for each vehicle
+      if (strategies.length > 0) {
+        strategies.forEach(strategy => {
+          const firstStint = strategy.stints[0]
+          if (!firstStint) return
+          const vehicle = vehicles?.find(v => v.id === strategy.vehicleId)
+          startStintLog(
+            strategy.vehicleId,
+            vehicle?.name ?? strategy.vehicleId,
+            1,
+            firstStint.pilotId,
+            getPilotName(firstStint.pilotId),
+            firstStint.plannedDurationMinutes,
+            0
+          )
+        })
+      }
     }
   }
 
@@ -101,6 +118,7 @@ export default function LiveRace() {
 
   const handleSaveStintRating = async () => {
     if (!stintRatingModal) return
+    const elapsed = timer.elapsed
     try {
       await pilotsApi.addStintRating(stintRatingModal.pilotId, {
         stintScore,
@@ -109,13 +127,49 @@ export default function LiveRace() {
         sessionDate: new Date().toISOString(),
       })
     } catch { /* silent — save best effort */ }
+    // End current stint log and start next
+    endStintLog(stintRatingModal.vehicleId, elapsed, stintScore, stintNotes || undefined)
     advanceStint(stintRatingModal.vehicleId)
+    // Find next stint and log its start
+    const strategy = strategies.find(s => s.vehicleId === stintRatingModal.vehicleId)
+    const nextStintIdx = (liveRace.currentStintByVehicle[stintRatingModal.vehicleId] ?? 0) + 1
+    const nextStint = strategy?.stints[nextStintIdx]
+    if (nextStint) {
+      const vehicle = vehicles?.find(v => v.id === stintRatingModal.vehicleId)
+      startStintLog(
+        stintRatingModal.vehicleId,
+        vehicle?.name ?? stintRatingModal.vehicleId,
+        nextStintIdx + 1,
+        nextStint.pilotId,
+        getPilotName(nextStint.pilotId),
+        nextStint.plannedDurationMinutes,
+        elapsed
+      )
+    }
     setStintRatingModal(null)
   }
 
   const handleSkipStintRating = () => {
     if (!stintRatingModal) return
+    const elapsed = timer.elapsed
+    endStintLog(stintRatingModal.vehicleId, elapsed)
     advanceStint(stintRatingModal.vehicleId)
+    // Log next stint start
+    const strategy = strategies.find(s => s.vehicleId === stintRatingModal.vehicleId)
+    const nextStintIdx = (liveRace.currentStintByVehicle[stintRatingModal.vehicleId] ?? 0) + 1
+    const nextStint = strategy?.stints[nextStintIdx]
+    if (nextStint) {
+      const vehicle = vehicles?.find(v => v.id === stintRatingModal.vehicleId)
+      startStintLog(
+        stintRatingModal.vehicleId,
+        vehicle?.name ?? stintRatingModal.vehicleId,
+        nextStintIdx + 1,
+        nextStint.pilotId,
+        getPilotName(nextStint.pilotId),
+        nextStint.plannedDurationMinutes,
+        elapsed
+      )
+    }
     setStintRatingModal(null)
   }
 
@@ -262,6 +316,50 @@ export default function LiveRace() {
           )
         })}
       </div>
+
+      {/* Stint Log */}
+      {liveRace.stintLogs.length > 0 && (
+        <Card title="Log de carrera">
+          <CardContent className="space-y-1 pt-2">
+            {[...liveRace.stintLogs].reverse().map(log => {
+              const fmtElapsed = (s: number) => {
+                const m = Math.floor(s / 60)
+                const sec = s % 60
+                return `T+${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+              }
+              const isOngoing = log.endElapsed === null
+              return (
+                <div key={log.id} className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${
+                  isOngoing ? 'bg-primary/5 border border-primary/20' : 'bg-smc-darker'
+                }`}>
+                  <Clock className={`w-3.5 h-3.5 flex-shrink-0 ${isOngoing ? 'text-primary' : 'text-smc-muted'}`} />
+                  <span className="font-mono text-xs text-smc-muted w-14 flex-shrink-0">{fmtElapsed(log.startElapsed)}</span>
+                  <span className="text-xs text-smc-muted flex-shrink-0">{log.vehicleName}</span>
+                  <span className="text-white font-medium flex-1 truncate">{log.pilotName}</span>
+                  {isOngoing ? (
+                    <span className="text-xs text-primary font-medium flex-shrink-0">EN CURSO</span>
+                  ) : (
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="text-xs text-smc-muted">{log.actualDurationMinutes}min real</span>
+                      {log.stintScore && (
+                        <div className="flex items-center gap-0.5">
+                          {Array.from({ length: 5 }, (_, i) => (
+                            <Star
+                              key={i}
+                              className={`w-3 h-3 ${i < Math.round(log.stintScore! / 2) ? 'text-warning fill-warning' : 'text-smc-border'}`}
+                            />
+                          ))}
+                          <span className="text-xs text-smc-muted ml-1">{log.stintScore}/10</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Incidents */}
       {liveRace.incidents.length > 0 && (
