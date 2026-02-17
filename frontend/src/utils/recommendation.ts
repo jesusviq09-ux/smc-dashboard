@@ -5,416 +5,323 @@ import {
 import { calculateWeightedScore, calculateVehicleAffinity, calculateCircuitAffinity } from './pilotScore'
 import { ScoreConfig } from './pilotScore'
 
-interface RecommendationInput {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface RecommendationInput {
   category: RaceCategory
   durationMinutes: number
   vehicles: Vehicle[]
   circuit?: Circuit
   pilots: Pilot[]
   priorityMode: RacePriorityMode
-  minStints?: number
   scoreConfig?: ScoreConfig
 }
 
-interface ScoredPilotWithAffinity extends Pilot {
-  finalScore: number
-  vehicleAffinity: Record<string, number>
-  eligibleCategories: string[]
-  totalScore: number
-}
+type VehicleRole = 'speed' | 'endurance' | 'balanced'
 
 interface ScoredPilot extends Pilot {
-  finalScore: number
+  baseScore: number           // weighted score + circuit affinity
+  roleScore: number           // role-specific score used for sorting
   vehicleAffinity: Record<string, number>
-  eligibleCategories: string[]
+  circuitBonus: number
 }
 
-const ENERGY_PER_STINT_WH = 200  // Baseline energy estimate per stint (configurable)
+const ENERGY_PER_STINT_WH = 200
 
-/**
- * Generate race strategy recommendation based on pilot scores, weights, and priority mode.
- */
+// ─── Main entry point ─────────────────────────────────────────────────────────
+
 export function generateRecommendation(input: RecommendationInput): RecommendationOutput {
-  const {
-    category,
-    durationMinutes,
-    vehicles,
-    pilots,
-    priorityMode,
-    minStints = 3,
-    scoreConfig,
-  } = input
-
+  const { category, durationMinutes, vehicles, pilots, priorityMode, scoreConfig, circuit } = input
   const warnings: string[] = []
 
-  // Step 1: Filter eligible pilots
-  const eligiblePilots = pilots.filter(pilot => {
-    if (category === 'F24+' && pilot.age < 16) {
-      return false
-    }
-    return pilot.availability !== false
+  // 1. Filter eligible pilots
+  const eligible = pilots.filter(p => {
+    if (category === 'F24+' && p.age < 16) return false
+    return p.availability !== false
   })
 
-  if (eligiblePilots.length < 2) {
-    warnings.push(`Solo ${eligiblePilots.length} piloto(s) elegible(s). Se necesitan al menos 2.`)
+  if (eligible.length < 2) {
+    warnings.push(`Solo ${eligible.length} piloto(s) elegible(s). Se necesitan al menos 2.`)
   }
 
-  // Step 2: Score each pilot per vehicle (including circuit affinity)
-  const scoredPilots: ScoredPilot[] = eligiblePilots.map(pilot => {
-    const baseScore = calculateWeightedScore(pilot.ratings, pilot.weightKg, scoreConfig)
-    const circuitBonus = input.circuit ? calculateCircuitAffinity(pilot, input.circuit) : 0
-    const finalScore = Math.round((baseScore + circuitBonus) * 100) / 100
-    const vehicleAffinity: Record<string, number> = {}
-    for (const vehicle of vehicles) {
-      vehicleAffinity[vehicle.id] = calculateVehicleAffinity(pilot.weightKg, vehicle.id)
-    }
+  // 2. Calculate dynamic stint count and durations
+  const numStints = calcNumStints(durationMinutes, circuit)
+  const stintDurations = calcStintDurations(durationMinutes, numStints, circuit)
 
+  // 3. Assign vehicle roles (speed / endurance / balanced)
+  const vehicleRoles = assignVehicleRoles(vehicles)
+
+  // 4. Pre-score pilots (base + circuit affinity + vehicle affinity)
+  const baseScoredPilots: ScoredPilot[] = eligible.map(pilot => {
+    const baseScore = calculateWeightedScore(pilot.ratings, pilot.weightKg, scoreConfig)
+    const circuitBonus = circuit ? calculateCircuitAffinity(pilot, circuit) : 0
+    const vehicleAffinity: Record<string, number> = {}
+    for (const v of vehicles) {
+      vehicleAffinity[v.id] = calculateVehicleAffinity(pilot.weightKg, v.id)
+    }
     return {
       ...pilot,
-      finalScore,
+      baseScore: Math.round((baseScore + circuitBonus) * 100) / 100,
+      roleScore: 0,  // filled per vehicle below
       vehicleAffinity,
-      eligibleCategories: pilot.age < 16 ? ['F24'] : ['F24', 'F24+'],
+      circuitBonus,
     }
   })
 
-  // Sort by score descending
-  scoredPilots.sort((a, b) => b.finalScore - a.finalScore)
+  // 5. Track which stint slots are occupied (stintNumber → Set of pilotIds)
+  // A pilot cannot drive the SAME stint number in two different cars simultaneously
+  const stintSlotOccupied: Record<number, Set<string>> = {}
+  for (let n = 1; n <= numStints; n++) stintSlotOccupied[n] = new Set()
 
-  // Step 3: Check if we have enough pilots for no-repeat assignment
-  const totalSlotsNeeded = vehicles.length * minStints
+  // 6. Build assignment for each vehicle
+  const vehicleAssignments = vehicles.map(vehicle => {
+    const role = vehicleRoles[vehicle.id]
 
-  let vehicleAssignments: ReturnType<typeof assignStintsForVehicle>[]
+    // Score pilots specifically for this vehicle's role
+    const rolePilots = baseScoredPilots
+      .map(p => ({
+        ...p,
+        roleScore: calcRoleScore(p, vehicle, role, circuit),
+      }))
+      .sort((a, b) => b.roleScore - a.roleScore)
 
-  if (totalSlotsNeeded <= eligiblePilots.length) {
-    // Enough pilots — original flow, no repetition across vehicles
-    const globalUsedPilotIds = new Set<string>()
-    vehicleAssignments = vehicles.map(vehicle => {
-      const assignment = assignStintsForVehicle({
-        vehicle,
-        scoredPilots,
-        globalUsedPilotIds,
-        durationMinutes,
-        minStints,
-        priorityMode,
-        category,
-        warnings,
-        circuit: input.circuit,
-      })
-      assignment.stints.forEach(s => globalUsedPilotIds.add(s.pilot.id))
-      return assignment
-    })
-  } else {
-    // Not enough pilots — use optimized greedy algorithm
-    vehicleAssignments = optimizeWithLimitedPilots({
-      vehicles,
-      scoredPilots,
-      durationMinutes,
-      minStints,
-      priorityMode,
-      warnings,
-      circuit: input.circuit,
-    })
-  }
-
-  return {
-    vehicleAssignments,
-    warnings,
-  }
-}
-
-// ─── GREEDY OPTIMIZER FOR LIMITED PILOTS ────────────────────────────────────
-
-interface OptimizeInput {
-  vehicles: Vehicle[]
-  scoredPilots: ScoredPilot[]
-  durationMinutes: number
-  minStints: number
-  priorityMode: RacePriorityMode
-  warnings: string[]
-  circuit?: Circuit
-}
-
-interface SlotCandidate {
-  vehicleIdx: number
-  vehicle: Vehicle
-  stintIdx: number    // 0-based
-  pilot: ScoredPilot
-  score: number
-}
-
-function optimizeWithLimitedPilots({
-  vehicles,
-  scoredPilots,
-  durationMinutes,
-  minStints,
-  priorityMode,
-  warnings,
-  circuit,
-}: OptimizeInput) {
-  const stintDurationMinutes = Math.floor(durationMinutes / minStints)
-
-  // Build all (vehicle, stintIdx, pilot) candidates with their score
-  const candidates: SlotCandidate[] = []
-  for (let vi = 0; vi < vehicles.length; vi++) {
-    const vehicle = vehicles[vi]
-    for (let si = 0; si < minStints; si++) {
-      for (const pilot of scoredPilots) {
-        const vehicleBonus = pilot.vehicleAffinity[vehicle.id] ?? 0
-        // Apply priority mode weighting to the base score
-        let score = pilot.finalScore + vehicleBonus
-        if (priorityMode === 'FINISH') {
-          score += (pilot.ratings.consistency + pilot.ratings.energyManagement) * 0.1
-        }
-        // Prefer best pilots in last stint for WIN mode
-        if (priorityMode === 'WIN' && si === minStints - 1) {
-          score += pilot.finalScore * 0.2
-        }
-        // Prefer experienced pilots in first and last stint for DEVELOP_JUNIORS
-        if (priorityMode === 'DEVELOP_JUNIORS') {
-          if ((si === 0 || si === minStints - 1) && pilot.age >= 16) score += 0.5
-          if (si > 0 && si < minStints - 1 && pilot.age < 16) score += 0.5
-        }
-        candidates.push({ vehicleIdx: vi, vehicle, stintIdx: si, pilot, score })
-      }
-    }
-  }
-
-  // Sort by score DESC — greedy assigns best fits first
-  candidates.sort((a, b) => b.score - a.score)
-
-  // Track assignments: assignments[vehicleIdx][stintIdx] = pilot | null
-  const assignments: (ScoredPilot | null)[][] = vehicles.map(() =>
-    Array(minStints).fill(null)
-  )
-  // Track how many times each pilot appears total
-  const pilotAppearances: Record<string, number> = {}
-  const maxAppearances = Math.ceil((vehicles.length * minStints) / scoredPilots.length)
-
-  for (const candidate of candidates) {
-    const { vehicleIdx, stintIdx, pilot } = candidate
-
-    // Skip if slot already filled
-    if (assignments[vehicleIdx][stintIdx] !== null) continue
-
-    // Skip if pilot already maxed out appearances
-    const appearances = pilotAppearances[pilot.id] ?? 0
-    if (appearances >= maxAppearances) continue
-
-    // Skip if pilot is already in ANY stint of this vehicle (one pilot per car rule)
-    const alreadyInVehicle = assignments[vehicleIdx].some(p => p?.id === pilot.id)
-    if (alreadyInVehicle) continue
-
-    // Assign
-    assignments[vehicleIdx][stintIdx] = pilot
-    pilotAppearances[pilot.id] = appearances + 1
-  }
-
-  // Fill any remaining nulls (fallback: best available without consecutive constraint)
-  for (let vi = 0; vi < vehicles.length; vi++) {
-    for (let si = 0; si < minStints; si++) {
-      if (assignments[vi][si] !== null) continue
-      // Try relaxed assignment (allow any pilot, just not already in this vehicle)
-      for (const pilot of scoredPilots) {
-        const alreadyInVehicle = assignments[vi].some(p => p?.id === pilot.id)
-        if (alreadyInVehicle) continue
-        assignments[vi][si] = pilot
-        pilotAppearances[pilot.id] = (pilotAppearances[pilot.id] ?? 0) + 1
-        break
-      }
-      // Last resort: any pilot
-      if (assignments[vi][si] === null) {
-        assignments[vi][si] = scoredPilots[0]
-        warnings.push(`No hay suficientes pilotos para ${vehicles[vi].name} stint ${si + 1}. Se reutiliza el mejor piloto.`)
-      }
-    }
-  }
-
-  // Build warnings for repeated pilots
-  for (const [pilotId, count] of Object.entries(pilotAppearances)) {
-    if (count > 1) {
-      const pilot = scoredPilots.find(p => p.id === pilotId)
-      if (!pilot) continue
-      const slots: string[] = []
-      for (let vi = 0; vi < vehicles.length; vi++) {
-        for (let si = 0; si < minStints; si++) {
-          if (assignments[vi][si]?.id === pilotId) {
-            slots.push(`${vehicles[vi].name} stint ${si + 1}`)
-          }
-        }
-      }
-      warnings.push(`${pilot.fullName} conduce en ${count} stints: ${slots.join(', ')}.`)
-    }
-  }
-
-  // Build final vehicle assignments
-  return vehicles.map((vehicle, vi) => {
-    const stints = assignments[vi].map((pilot, si) => {
-      const p = pilot! as ScoredPilotWithAffinity
-      const stintNumber = si + 1
-      const objective = determineObjective(stintNumber, minStints)
-      const justification = buildJustification(
-        { ...p, totalScore: p.finalScore + (p.vehicleAffinity[vehicle.id] ?? 0) },
-        vehicle, stintNumber, minStints, priorityMode, circuit
-      )
-      return {
-        stintNumber,
-        pilot: pilot as Pilot,
-        plannedDurationMinutes: stintDurationMinutes,
-        objective,
-        estimatedEnergyWh: ENERGY_PER_STINT_WH * (objective === 'AGGRESSIVE' ? 1.2 : objective === 'CONSERVATIVE' ? 0.75 : 1.0),
-        justification,
-      }
-    })
-
-    const totalEnergyEstimateWh = stints.reduce((sum, s) => sum + s.estimatedEnergyWh, 0)
-    const finishProbability = calculateFinishProbability(stints, totalEnergyEstimateWh)
-
-    return {
+    const stints = buildStints({
       vehicle,
-      stints,
-      totalEnergyEstimateWh: Math.round(totalEnergyEstimateWh),
-      finishProbability: Math.round(finishProbability * 100) / 100,
-    }
+      rolePilots,
+      numStints,
+      stintDurations,
+      priorityMode,
+      stintSlotOccupied,
+      circuit,
+      warnings,
+    })
+
+    const totalEnergyEstimateWh = Math.round(
+      stints.reduce((sum, s) => sum + s.estimatedEnergyWh, 0)
+    )
+    const finishProbability = calcFinishProbability(stints, totalEnergyEstimateWh)
+
+    return { vehicle, stints, totalEnergyEstimateWh, finishProbability }
   })
+
+  return { vehicleAssignments, warnings }
 }
 
-// ─── ORIGINAL VEHICLE ASSIGNMENT (sufficient pilots) ────────────────────────
+// ─── Dynamic stint count ──────────────────────────────────────────────────────
 
-interface VehicleAssignmentInput {
-  vehicle: Vehicle
-  scoredPilots: ScoredPilot[]
-  globalUsedPilotIds: Set<string>
-  durationMinutes: number
-  minStints: number
-  priorityMode: RacePriorityMode
-  category: RaceCategory
-  warnings: string[]
+export function calcNumStints(durationMinutes: number, circuit?: Circuit): number {
+  const technical = circuit?.demandingTechnical ?? 5
+  const physical = circuit?.demandingPhysical ?? 5
+
+  if (durationMinutes >= 80) {
+    // F24 (90 min)
+    if (technical >= 7 || physical >= 7) return 4
+    return 3
+  }
+  // F24+ (60 min) — always 3 stints
+  return 3
+}
+
+// ─── Stint duration distribution ─────────────────────────────────────────────
+
+export function calcStintDurations(
+  totalMinutes: number,
+  numStints: number,
   circuit?: Circuit
+): number[] {
+  const energy = circuit?.energyConsumption ?? 5
+
+  // Base percentage distributions per stint count
+  const baseDistributions: Record<number, number[]> = {
+    2: [0.55, 0.45],
+    3: [0.40, 0.35, 0.25],
+    4: [0.30, 0.27, 0.25, 0.18],
+  }
+
+  let percentages = baseDistributions[numStints] ?? baseDistributions[3]
+
+  // High energy consumption circuit: put heavier stint in the middle, shorter at start
+  if (energy >= 7) {
+    if (numStints === 3) percentages = [0.28, 0.42, 0.30]
+    if (numStints === 4) percentages = [0.22, 0.30, 0.28, 0.20]
+  }
+
+  // Convert to minutes, ensure each is at least 10 min and integers
+  const raw = percentages.map(p => Math.round(totalMinutes * p))
+
+  // Adjust last stint to absorb rounding errors
+  const sumRaw = raw.reduce((a, b) => a + b, 0)
+  raw[raw.length - 1] += totalMinutes - sumRaw
+
+  return raw.map(m => Math.max(10, m))
 }
 
-function assignStintsForVehicle({
+// ─── Vehicle roles ────────────────────────────────────────────────────────────
+
+function assignVehicleRoles(vehicles: Vehicle[]): Record<string, VehicleRole> {
+  if (vehicles.length <= 1) {
+    return Object.fromEntries(vehicles.map(v => [v.id, 'balanced' as VehicleRole]))
+  }
+
+  // Sort vehicles: lighter/aluminium first → 'speed', heavier/steel → 'endurance'
+  const sorted = [...vehicles].sort((a, b) => {
+    const matA = a.material?.toLowerCase().includes('alumin') ? 0 : 1
+    const matB = b.material?.toLowerCase().includes('alumin') ? 0 : 1
+    if (matA !== matB) return matA - matB
+    return (a.weightKg ?? 100) - (b.weightKg ?? 100)
+  })
+
+  const roles: Record<string, VehicleRole> = {}
+  sorted.forEach((v, idx) => {
+    if (idx === 0) roles[v.id] = 'speed'
+    else if (idx === sorted.length - 1) roles[v.id] = 'endurance'
+    else roles[v.id] = 'balanced'
+  })
+  return roles
+}
+
+// ─── Role-specific scoring ────────────────────────────────────────────────────
+
+function calcRoleScore(
+  pilot: ScoredPilot,
+  vehicle: Vehicle,
+  role: VehicleRole,
+  circuit?: Circuit
+): number {
+  const r = pilot.ratings
+  const va = pilot.vehicleAffinity[vehicle.id] ?? 0
+  const ca = pilot.circuitBonus
+
+  if (role === 'speed') {
+    // Prioritise drivers who are fast and adaptable
+    return r.driving * 0.40 + r.adaptation * 0.20 + r.experience * 0.10 + ca + va
+  }
+  if (role === 'endurance') {
+    // Prioritise consistency and energy management
+    return r.energyManagement * 0.40 + r.consistency * 0.30 + r.experience * 0.20 + ca + va
+  }
+  // balanced
+  return pilot.baseScore + ca + va
+}
+
+// ─── Stint builder ────────────────────────────────────────────────────────────
+
+interface BuildStintsInput {
+  vehicle: Vehicle
+  rolePilots: ScoredPilot[]
+  numStints: number
+  stintDurations: number[]
+  priorityMode: RacePriorityMode
+  stintSlotOccupied: Record<number, Set<string>>
+  circuit?: Circuit
+  warnings: string[]
+}
+
+function buildStints({
   vehicle,
-  scoredPilots,
-  globalUsedPilotIds,
-  durationMinutes,
-  minStints,
+  rolePilots,
+  numStints,
+  stintDurations,
   priorityMode,
-  warnings,
+  stintSlotOccupied,
   circuit,
-}: VehicleAssignmentInput) {
-  const stintDurationMinutes = Math.floor(durationMinutes / minStints)
+  warnings,
+}: BuildStintsInput) {
+  // Choose pilot order based on priority mode
+  const orderedPilots = selectPilotOrder(rolePilots, numStints, priorityMode, warnings, vehicle.name)
 
-  // Score pilots with vehicle affinity, sorted best first
-  const allVehiclePilots = scoredPilots
-    .map(p => ({
-      ...p,
-      totalScore: p.finalScore + (p.vehicleAffinity[vehicle.id] ?? 0),
-    }))
-    .sort((a, b) => b.totalScore - a.totalScore)
+  const stints = orderedPilots.map((pilot, idx) => {
+    const stintNumber = idx + 1
+    const durationMinutes = stintDurations[idx] ?? stintDurations[stintDurations.length - 1]
+    const objective = determineObjective(stintNumber, numStints)
+    const energyFactor = objective === 'AGGRESSIVE' ? 1.2 : objective === 'CONSERVATIVE' ? 0.75 : 1.0
+    const estimatedEnergyWh = ENERGY_PER_STINT_WH * energyFactor * (durationMinutes / 20)
 
-  // Prefer pilots not yet used by other vehicles
-  const availablePilots = allVehiclePilots.filter(p => !globalUsedPilotIds.has(p.id))
-  const fallbackPilots = allVehiclePilots.filter(p => globalUsedPilotIds.has(p.id))
-
-  // Use available pilots first; if not enough, supplement with fallbacks (with warning)
-  const vehicleScoredPilots = availablePilots.length >= minStints
-    ? availablePilots
-    : [
-        ...availablePilots,
-        ...fallbackPilots.filter(p => !availablePilots.some(a => a.id === p.id)),
-      ]
-
-  if (availablePilots.length < minStints && availablePilots.length < allVehiclePilots.length) {
-    warnings.push(`Pocos pilotos disponibles para ${vehicle.name}. Algunos pilotos se asignan a varios vehículos.`)
-  }
-
-  // Select pilots based on priority mode
-  let orderedPilots: typeof vehicleScoredPilots = []
-
-  if (priorityMode === 'WIN') {
-    orderedPilots = selectForWin(vehicleScoredPilots, minStints)
-  } else if (priorityMode === 'FINISH') {
-    const consistentFirst = [...vehicleScoredPilots].sort((a, b) =>
-      (b.ratings.consistency + b.ratings.energyManagement) -
-      (a.ratings.consistency + a.ratings.energyManagement)
-    )
-    orderedPilots = consistentFirst.slice(0, minStints)
-  } else if (priorityMode === 'DEVELOP_JUNIORS') {
-    orderedPilots = selectForDevelopment(vehicleScoredPilots, minStints, warnings)
-  }
-
-  // Fallback if not enough pilots
-  while (orderedPilots.length < minStints) {
-    const available = vehicleScoredPilots.find(p =>
-      !orderedPilots.some(op => op.id === p.id)
-    )
-    if (available) {
-      orderedPilots.push(available)
-    } else {
-      orderedPilots.push(vehicleScoredPilots[0])
-      warnings.push(`No hay suficientes pilotos para ${vehicle.name}. Se reutiliza un piloto.`)
-    }
-  }
-
-  // Build stint assignments
-  const stints = orderedPilots.slice(0, minStints).map((pilot, index) => {
-    const stintNumber = index + 1
-    const objective = determineObjective(stintNumber, minStints)
-    const justification = buildJustification(pilot, vehicle, stintNumber, minStints, priorityMode, circuit)
+    // Mark this slot as used
+    stintSlotOccupied[stintNumber].add(pilot.id)
 
     return {
       stintNumber,
       pilot: pilot as Pilot,
-      plannedDurationMinutes: stintDurationMinutes,
+      plannedDurationMinutes: durationMinutes,
       objective,
-      estimatedEnergyWh: ENERGY_PER_STINT_WH * (objective === 'AGGRESSIVE' ? 1.2 : objective === 'CONSERVATIVE' ? 0.75 : 1.0),
-      justification,
+      estimatedEnergyWh: Math.round(estimatedEnergyWh),
+      justification: buildJustification(pilot, vehicle, stintNumber, numStints, priorityMode, circuit, durationMinutes),
     }
   })
 
-  const totalEnergyEstimateWh = stints.reduce((sum, s) => sum + s.estimatedEnergyWh, 0)
-  const finishProbability = calculateFinishProbability(stints, totalEnergyEstimateWh)
-
-  return {
-    vehicle,
-    stints,
-    totalEnergyEstimateWh: Math.round(totalEnergyEstimateWh),
-    finishProbability: Math.round(finishProbability * 100) / 100,
-  }
+  return stints
 }
 
-function selectForWin(pilots: ScoredPilotWithAffinity[], count: number): ScoredPilotWithAffinity[] {
-  // Top scorer in last stint (closer), second in first, fill middle
-  const sorted = [...pilots].sort((a, b) => b.totalScore - a.totalScore)
-  if (count === 3) {
-    return [sorted[1], sorted[2] ?? sorted[0], sorted[0]]
+// ─── Pilot ordering by priority mode ─────────────────────────────────────────
+
+function selectPilotOrder(
+  pilots: ScoredPilot[],
+  numStints: number,
+  priorityMode: RacePriorityMode,
+  warnings: string[],
+  vehicleName: string
+): ScoredPilot[] {
+  const result: ScoredPilot[] = []
+  const used = new Set<string>()
+
+  const pickBest = (pool: ScoredPilot[], exclude = used): ScoredPilot | undefined =>
+    pool.find(p => !exclude.has(p.id))
+
+  if (priorityMode === 'WIN') {
+    // Best pilot closes (last stint), second opens, rest in middle
+    const sorted = [...pilots]
+    const closer = sorted[0]
+    const opener = sorted[1] ?? sorted[0]
+
+    if (numStints === 2) {
+      result.push(opener, closer)
+    } else {
+      result.push(opener)
+      used.add(opener.id)
+      // Fill middle with best available
+      for (let i = 1; i < numStints - 1; i++) {
+        const mid = pickBest(sorted) ?? sorted[0]
+        result.push(mid)
+        used.add(mid.id)
+      }
+      result.push(closer)
+    }
+  } else if (priorityMode === 'FINISH') {
+    // Most consistent and energy-efficient pilots
+    const consistent = [...pilots].sort((a, b) =>
+      (b.ratings.consistency + b.ratings.energyManagement) -
+      (a.ratings.consistency + a.ratings.energyManagement)
+    )
+    for (let i = 0; i < numStints; i++) {
+      result.push(consistent[i % consistent.length])
+    }
+  } else if (priorityMode === 'DEVELOP_JUNIORS') {
+    const juniors = pilots.filter(p => p.age < 16)
+    const seniors = pilots.filter(p => p.age >= 16)
+
+    if (juniors.length === 0) {
+      warnings.push(`No hay pilotos junior para "${vehicleName}". Usando modo FINISH.`)
+      return selectPilotOrder(pilots, numStints, 'FINISH', warnings, vehicleName)
+    }
+
+    // Seniors bookend, juniors in middle
+    result.push(seniors[0] ?? juniors[0])
+    for (let i = 1; i < numStints - 1; i++) {
+      result.push(juniors[(i - 1) % juniors.length])
+    }
+    result.push(seniors[1] ?? seniors[0] ?? juniors[0])
   }
-  return sorted.slice(0, count)
+
+  // Fallback: fill any missing slots
+  while (result.length < numStints) {
+    result.push(pilots[result.length % pilots.length] ?? pilots[0])
+  }
+
+  return result.slice(0, numStints)
 }
 
-function selectForDevelopment(
-  pilots: ScoredPilotWithAffinity[],
-  count: number,
-  warnings: string[]
-): ScoredPilotWithAffinity[] {
-  const juniors = pilots.filter(p => p.age !== undefined && p.age < 16)
-  const seniors = pilots.filter(p => p.age === undefined || p.age >= 16)
-
-  if (juniors.length === 0) {
-    warnings.push('No hay pilotos junior disponibles para el modo "Desarrollar Juniors".')
-    return seniors.slice(0, count)
-  }
-
-  // Seniors in first and last, juniors in middle
-  const result: ScoredPilotWithAffinity[] = []
-  result.push(seniors[0]) // First stint: experienced
-  if (count > 2) {
-    result.push(...juniors.slice(0, count - 2)) // Middle: juniors
-  }
-  result.push(seniors[1] ?? seniors[0]) // Last: experienced
-
-  return result.slice(0, count)
-}
+// ─── Objective by stint position ──────────────────────────────────────────────
 
 function determineObjective(stintNumber: number, totalStints: number): StintObjective {
   if (stintNumber === 1) return 'CONSERVATIVE'
@@ -422,71 +329,72 @@ function determineObjective(stintNumber: number, totalStints: number): StintObje
   return 'BALANCED'
 }
 
+// ─── Rich justification ───────────────────────────────────────────────────────
+
 function buildJustification(
-  pilot: { fullName: string; weightKg: number; ratings: Pilot['ratings']; totalScore: number; vehicleAffinity: Record<string, number> },
+  pilot: ScoredPilot,
   vehicle: Vehicle,
   stintNumber: number,
   totalStints: number,
   priorityMode: RacePriorityMode,
-  circuit?: Circuit
+  circuit: Circuit | undefined,
+  durationMinutes: number
 ): string {
+  const r = pilot.ratings
   const parts: string[] = []
-  const affinityBonus = pilot.vehicleAffinity[vehicle.id] ?? 0
 
-  // Position reason
+  // Position
   if (stintNumber === 1) {
-    parts.push(`Stint inicial: piloto sólido para establecer ritmo y conservar energía`)
+    parts.push(`Stint inicial (${durationMinutes} min): establece ritmo y gestiona energía`)
   } else if (stintNumber === totalStints) {
-    parts.push(`Stint final: piloto de cierre ${priorityMode === 'WIN' ? 'más rápido del equipo' : 'consistente para asegurar llegada'}`)
+    parts.push(`Cierre (${durationMinutes} min): ${priorityMode === 'WIN' ? 'sprint final para ganar' : 'asegurar la llegada'}`)
   } else {
-    parts.push(`Stint intermedio: gestión equilibrada de energía`)
+    parts.push(`Stint ${stintNumber} (${durationMinutes} min): gestión equilibrada`)
   }
 
-  // Score reason
-  parts.push(`Puntuación: ${pilot.totalScore.toFixed(1)}/10`)
+  // Score
+  parts.push(`Score rol: ${pilot.roleScore.toFixed(1)}`)
 
-  // Circuit compatibility hints
+  // Circuit-specific strengths
   if (circuit) {
-    if ((circuit.demandingTechnical ?? 5) >= 7 && pilot.ratings.driving >= 7) {
-      parts.push(`Buen pilotaje para circuito técnico (${pilot.ratings.driving}/10)`)
+    const tech = circuit.demandingTechnical ?? 5
+    const phys = circuit.demandingPhysical ?? 5
+    const energy = circuit.energyConsumption ?? 5
+
+    if (tech >= 7 && r.driving >= 7) {
+      parts.push(`Conducción ${r.driving}/10 ↔ circuito técnico ${tech}/10`)
     }
-    if ((circuit.energyConsumption ?? 5) >= 7 && pilot.ratings.energyManagement >= 7) {
-      parts.push(`Gestión energética adecuada para este circuito (${pilot.ratings.energyManagement}/10)`)
+    if (energy >= 7 && r.energyManagement >= 7) {
+      parts.push(`Energía ${r.energyManagement}/10 ↔ alto consumo ${energy}/10`)
     }
-    if ((circuit.demandingPhysical ?? 5) >= 7 && pilot.ratings.experience >= 7) {
-      parts.push(`Experiencia para circuito físicamente exigente (${pilot.ratings.experience}/10)`)
+    if (phys >= 7 && r.experience >= 7) {
+      parts.push(`Exp. ${r.experience}/10 ↔ exigencia física ${phys}/10`)
     }
   } else {
-    if (pilot.ratings.energyManagement >= 8) {
-      parts.push(`Gestión energética destacada (${pilot.ratings.energyManagement}/10)`)
-    }
-    if (pilot.ratings.consistency >= 8) {
-      parts.push(`Alta consistencia (${pilot.ratings.consistency}/10)`)
-    }
+    if (r.consistency >= 8) parts.push(`Consistencia destacada: ${r.consistency}/10`)
+    if (r.energyManagement >= 8) parts.push(`Energía destacada: ${r.energyManagement}/10`)
+    if (r.driving >= 8) parts.push(`Conducción destacada: ${r.driving}/10`)
   }
 
-  // Weight reason for SMC 02 EVO
-  if (affinityBonus > 0) {
-    parts.push(`Bonificación por peso (${pilot.weightKg}kg): +${affinityBonus.toFixed(2)} en ${vehicle.name}`)
+  // Vehicle affinity
+  const va = pilot.vehicleAffinity[vehicle.id] ?? 0
+  if (va > 0) {
+    parts.push(`+${va.toFixed(2)} afinidad peso (${pilot.weightKg}kg en ${vehicle.name})`)
   }
 
   return parts.join(' · ')
 }
 
-function calculateFinishProbability(
+// ─── Finish probability ───────────────────────────────────────────────────────
+
+function calcFinishProbability(
   stints: { objective: StintObjective; estimatedEnergyWh: number }[],
   totalEnergyWh: number
 ): number {
-  // Base probability from consistency
-  let probability = 0.85
-
-  // Aggressive stints increase risk
+  let p = 0.85
   const aggressiveCount = stints.filter(s => s.objective === 'AGGRESSIVE').length
-  probability -= aggressiveCount * 0.05
-
-  // Too many stints with high energy = lower probability
-  if (totalEnergyWh > 600) probability -= 0.05
-  if (totalEnergyWh > 800) probability -= 0.10
-
-  return Math.max(0.4, Math.min(0.99, probability))
+  p -= aggressiveCount * 0.05
+  if (totalEnergyWh > 600) p -= 0.05
+  if (totalEnergyWh > 800) p -= 0.10
+  return Math.round(Math.max(0.4, Math.min(0.99, p)) * 100) / 100
 }

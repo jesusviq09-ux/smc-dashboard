@@ -1,18 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ChevronLeft, Play, Zap, AlertCircle, Trash2, Minus, Plus } from 'lucide-react'
+import { ChevronLeft, Play, Zap, AlertCircle, Trash2, Minus, Plus, BrainCircuit, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
 import { circuitsApi } from '@/services/api/circuits.api'
 import { Card, CardContent } from '@/components/ui/Card'
-import { generateRecommendation } from '@/utils/recommendation'
+import { generateRecommendation, calcNumStints } from '@/utils/recommendation'
 import ManualStrategyBuilder from './ManualStrategyBuilder'
 import { db } from '@/services/indexeddb/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { RacePriorityMode } from '@/types'
+import { analyzeStrategy, isGeminiAvailable } from '@/services/ai/gemini'
+import type { AnalysisPayload } from '@/services/ai/gemini'
 
 const PRIORITY_MODES: { value: RacePriorityMode; label: string; desc: string }[] = [
   { value: 'WIN', label: 'Ganar carrera', desc: 'Mejores pilotos en stints clave' },
@@ -28,6 +30,10 @@ export default function RaceDetail() {
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [strategyTab, setStrategyTab] = useState<'auto' | 'manual'>('auto')
+  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiExpanded, setAiExpanded] = useState(true)
   const queryClient = useQueryClient()
 
   const { data: race, isLoading } = useQuery({
@@ -72,11 +78,12 @@ export default function RaceDetail() {
   if (isLoading) return <div className="skeleton h-96 rounded-xl" />
   if (!race) return <p className="text-smc-muted">Carrera no encontrada</p>
 
+  const category = race.categories.includes('F24') ? 'F24' : 'F24+'
+  const durationMinutes = category === 'F24+' ? 60 : 90
+  const expectedStints = calcNumStints(durationMinutes, circuit ?? undefined)
+
   const handleGenerateStrategy = () => {
     if (!vehicles || !pilots.length) return
-
-    const category = race.categories.includes('F24') ? 'F24' : 'F24+'
-    const durationMinutes = category === 'F24+' ? 60 : 90
 
     const result = generateRecommendation({
       category,
@@ -88,6 +95,9 @@ export default function RaceDetail() {
     })
 
     setRecommendation(result)
+    // Reset AI analysis when strategy is regenerated
+    setAiAnalysis(null)
+    setAiError(null)
   }
 
   const handleSaveStrategy = async () => {
@@ -121,8 +131,37 @@ export default function RaceDetail() {
     }
   }
 
+  const handleAnalyzeWithAI = async () => {
+    if (!recommendation) return
+    setAiLoading(true)
+    setAiError(null)
+    setAiExpanded(true)
+    try {
+      const payload: AnalysisPayload = {
+        recommendation,
+        input: { category, durationMinutes, priorityMode },
+        circuit: circuit ?? undefined,
+        pilots,
+      }
+      const text = await analyzeStrategy(payload)
+      setAiAnalysis(text)
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : 'Error desconocido')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   const objectiveColors = { CONSERVATIVE: 'badge-green', BALANCED: 'badge-primary', AGGRESSIVE: 'badge-red' }
   const objectiveLabels = { CONSERVATIVE: 'Conservador', BALANCED: 'Equilibrado', AGGRESSIVE: 'Agresivo' }
+
+  // Dynamic stint info hint
+  const stintHintParts: string[] = [`${expectedStints} stints`]
+  if (circuit) {
+    if ((circuit.demandingTechnical ?? 0) >= 7) stintHintParts.push('circuito técnico exigente')
+    if ((circuit.demandingPhysical ?? 0) >= 7) stintHintParts.push('alta exigencia física')
+    if ((circuit.energyConsumption ?? 0) >= 7) stintHintParts.push('alto consumo energético')
+  }
 
   return (
     <div className="space-y-6">
@@ -197,7 +236,16 @@ export default function RaceDetail() {
           {/* AUTO TAB */}
           {strategyTab === 'auto' && (
             <div className="space-y-4">
-              <p className="text-xs text-smc-muted">Basado en puntuaciones y disponibilidad de pilotos</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-smc-muted">Basado en puntuaciones y disponibilidad de pilotos</p>
+                {/* Dynamic stint hint */}
+                <span className="text-xs text-smc-muted bg-smc-darker border border-smc-border rounded-full px-3 py-1 hidden sm:inline-flex items-center gap-1">
+                  <span className="text-primary font-medium">{stintHintParts[0]}</span>
+                  {stintHintParts.length > 1 && (
+                    <span> · {stintHintParts.slice(1).join(' · ')}</span>
+                  )}
+                </span>
+              </div>
               <div>
                 <label className="label">Modo de prioridad</label>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -219,7 +267,7 @@ export default function RaceDetail() {
                 </div>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex flex-wrap gap-3">
                 <button onClick={handleGenerateStrategy} className="btn-primary flex items-center gap-2">
                   <Zap className="w-4 h-4" /> Generar estrategia óptima
                 </button>
@@ -228,7 +276,52 @@ export default function RaceDetail() {
                     {saving ? 'Guardando...' : 'Guardar estrategia'}
                   </button>
                 )}
+                {recommendation && isGeminiAvailable() && (
+                  <button
+                    onClick={handleAnalyzeWithAI}
+                    disabled={aiLoading}
+                    className="btn-secondary flex items-center gap-2 border-violet-500/30 text-violet-400 hover:border-violet-500/60 hover:text-violet-300"
+                  >
+                    {aiLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <BrainCircuit className="w-4 h-4" />
+                    )}
+                    {aiLoading ? 'Analizando...' : 'Analizar con IA'}
+                  </button>
+                )}
               </div>
+
+              {/* AI Analysis panel */}
+              {(aiAnalysis || aiError) && (
+                <div className={`rounded-xl border overflow-hidden transition-all ${
+                  aiError ? 'border-danger/30 bg-danger/5' : 'border-violet-500/30 bg-violet-500/5'
+                }`}>
+                  <button
+                    onClick={() => setAiExpanded(v => !v)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <BrainCircuit className={`w-4 h-4 ${aiError ? 'text-danger' : 'text-violet-400'}`} />
+                      <span className={`text-sm font-medium ${aiError ? 'text-danger' : 'text-violet-300'}`}>
+                        {aiError ? 'Error en análisis IA' : 'Análisis táctico IA (Gemini)'}
+                      </span>
+                    </div>
+                    {aiExpanded ? (
+                      <ChevronUp className="w-4 h-4 text-smc-muted" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-smc-muted" />
+                    )}
+                  </button>
+                  {aiExpanded && (
+                    <div className="px-4 pb-4">
+                      <p className={`text-sm leading-relaxed ${aiError ? 'text-danger' : 'text-smc-text'}`}>
+                        {aiError ?? aiAnalysis}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {recommendation && (
                 <div className="space-y-4">
