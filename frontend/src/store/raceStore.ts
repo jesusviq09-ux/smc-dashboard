@@ -193,6 +193,20 @@ export const useRaceStore = create<RaceStore>()(
     }),
     {
       name: 'smc-live-race',
+      version: 2,
+      migrate: (persistedState: any, version: number) => {
+        // v1 → v2: add stintLogs field
+        if (version < 2) {
+          return {
+            liveRace: {
+              ...INITIAL_LIVE_STATE,
+              ...persistedState?.liveRace,
+              stintLogs: persistedState?.liveRace?.stintLogs ?? [],
+            },
+          }
+        }
+        return persistedState
+      },
       partialize: (state) => ({ liveRace: state.liveRace }),
     }
   )

@@ -250,6 +250,17 @@ export default function LiveRace() {
         </CardContent>
       </Card>
 
+      {/* No strategies warning */}
+      {strategies.length === 0 && (
+        <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-4 text-sm text-warning flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+          <div>
+            <p className="font-semibold">Sin estrategia guardada</p>
+            <p className="text-xs mt-0.5 text-warning/80">Vuelve al detalle de la carrera y genera o crea una estrategia antes de iniciar.</p>
+          </div>
+        </div>
+      )}
+
       {/* Vehicle Dashboards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {strategies.map(strategy => {
@@ -318,10 +329,10 @@ export default function LiveRace() {
       </div>
 
       {/* Stint Log */}
-      {liveRace.stintLogs.length > 0 && (
+      {(liveRace.stintLogs ?? []).length > 0 && (
         <Card title="Log de carrera">
           <CardContent className="space-y-1 pt-2">
-            {[...liveRace.stintLogs].reverse().map(log => {
+            {[...(liveRace.stintLogs ?? [])].reverse().map(log => {
               const fmtElapsed = (s: number) => {
                 const m = Math.floor(s / 60)
                 const sec = s % 60

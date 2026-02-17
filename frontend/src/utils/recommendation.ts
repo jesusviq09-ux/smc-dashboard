@@ -200,10 +200,9 @@ function optimizeWithLimitedPilots({
     const appearances = pilotAppearances[pilot.id] ?? 0
     if (appearances >= maxAppearances) continue
 
-    // Skip if pilot is in adjacent stint of same vehicle (fatigue constraint)
-    const prevPilot = stintIdx > 0 ? assignments[vehicleIdx][stintIdx - 1] : null
-    const nextPilot = stintIdx < minStints - 1 ? assignments[vehicleIdx][stintIdx + 1] : null
-    if (prevPilot?.id === pilot.id || nextPilot?.id === pilot.id) continue
+    // Skip if pilot is already in ANY stint of this vehicle (one pilot per car rule)
+    const alreadyInVehicle = assignments[vehicleIdx].some(p => p?.id === pilot.id)
+    if (alreadyInVehicle) continue
 
     // Assign
     assignments[vehicleIdx][stintIdx] = pilot
@@ -214,11 +213,10 @@ function optimizeWithLimitedPilots({
   for (let vi = 0; vi < vehicles.length; vi++) {
     for (let si = 0; si < minStints; si++) {
       if (assignments[vi][si] !== null) continue
-      // Try relaxed assignment (allow any pilot, just not same consecutive)
+      // Try relaxed assignment (allow any pilot, just not already in this vehicle)
       for (const pilot of scoredPilots) {
-        const prevPilot = si > 0 ? assignments[vi][si - 1] : null
-        const nextPilot = si < minStints - 1 ? assignments[vi][si + 1] : null
-        if (prevPilot?.id === pilot.id || nextPilot?.id === pilot.id) continue
+        const alreadyInVehicle = assignments[vi].some(p => p?.id === pilot.id)
+        if (alreadyInVehicle) continue
         assignments[vi][si] = pilot
         pilotAppearances[pilot.id] = (pilotAppearances[pilot.id] ?? 0) + 1
         break
