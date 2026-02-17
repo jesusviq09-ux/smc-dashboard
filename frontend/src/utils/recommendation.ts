@@ -267,11 +267,23 @@ function selectPilotsPerStint(
   warnings: string[],
   vehicleName: string
 ): ScoredPilot[] {
-  // Helper: best available pilot for a given stint slot
+  // pickedInThisCar: pilots already assigned to a previous stint in THIS car.
+  // Combined with stintSlotOccupied (other cars), gives full exclusion.
+  const pickedInThisCar = new Set<string>()
+
+  // Best pilot for a slot that is:
+  //   (a) not locked by another car at this stintNumber, AND
+  //   (b) not already driving a different stint in this same car
+  // If no pilot satisfies both, relax (b) — pilots can repeat if there's no other option.
   const bestFor = (stintNumber: number, prefer?: (p: ScoredPilot) => boolean): ScoredPilot => {
-    const locked = stintSlotOccupied[stintNumber] ?? new Set()
-    const available = pilots.filter(p => !locked.has(p.id))
-    const pool = available.length > 0 ? available : pilots  // fallback: reuse if no option
+    const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
+
+    // Ideal: not locked by other car AND not already in this car
+    const ideal = pilots.filter(p => !lockedSlot.has(p.id) && !pickedInThisCar.has(p.id))
+    // Acceptable: not locked by other car (may repeat in this car)
+    const acceptable = pilots.filter(p => !lockedSlot.has(p.id))
+    // Last resort: anyone (same pilot in same slot of two cars — only if truly unavoidable)
+    const pool = ideal.length > 0 ? ideal : acceptable.length > 0 ? acceptable : pilots
 
     if (prefer) {
       const preferred = pool.filter(prefer)
@@ -280,44 +292,48 @@ function selectPilotsPerStint(
     return pool[0]
   }
 
+  const pick = (pilot: ScoredPilot) => {
+    result.push(pilot)
+    pickedInThisCar.add(pilot.id)
+  }
+
   const result: ScoredPilot[] = []
 
   if (priorityMode === 'WIN') {
-    // Stint 1: second-best opener; last: best closer; middle: best available each slot
-    // We work slot by slot so stintSlotOccupied is respected per position
-    const topPilot = pilots[0]
-    const secondPilot = pilots[1] ?? pilots[0]
-
+    // Slot order: opener (2nd best) → middle (best available) → closer (best)
     for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
       const stintNumber = stintIdx + 1
-      const locked = stintSlotOccupied[stintNumber] ?? new Set()
+      const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
+      const notLockedByOtherCar = pilots.filter(p => !lockedSlot.has(p.id))
+      const idealPool = notLockedByOtherCar.filter(p => !pickedInThisCar.has(p.id))
+      const pool = idealPool.length > 0 ? idealPool : notLockedByOtherCar.length > 0 ? notLockedByOtherCar : pilots
 
       if (stintNumber === numStints) {
-        // Best pilot closes — if locked, pick next best available
-        const available = pilots.filter(p => !locked.has(p.id))
-        result.push(available[0] ?? topPilot)
+        // Best pilot closes
+        pick(pool[0])
       } else if (stintNumber === 1) {
-        // Second best opens
-        const available = pilots.filter(p => !locked.has(p.id))
-        // Pick second-best not already used as closer
-        result.push(available.find(p => p.id !== topPilot.id) ?? available[0] ?? secondPilot)
+        // Second best opens (prefer not the top of pool to save best for close)
+        const opener = pool.length > 1 ? pool[1] : pool[0]
+        pick(opener)
       } else {
         // Middle: best available
-        result.push(bestFor(stintNumber))
+        pick(pool[0])
       }
     }
 
   } else if (priorityMode === 'FINISH') {
-    // Most consistent pilots — one per slot, round-robin if fewer pilots than stints
+    // Most consistent & energy-efficient pilots, each stint a different pilot if possible
     const sorted = [...pilots].sort((a, b) =>
       (b.ratings.consistency + b.ratings.energyManagement) -
       (a.ratings.consistency + a.ratings.energyManagement)
     )
     for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
       const stintNumber = stintIdx + 1
-      const locked = stintSlotOccupied[stintNumber] ?? new Set()
-      const available = sorted.filter(p => !locked.has(p.id))
-      result.push(available[0] ?? sorted[stintIdx % sorted.length])
+      const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
+      const ideal = sorted.filter(p => !lockedSlot.has(p.id) && !pickedInThisCar.has(p.id))
+      const acceptable = sorted.filter(p => !lockedSlot.has(p.id))
+      const chosen = ideal[0] ?? acceptable[0] ?? sorted[stintIdx % sorted.length]
+      pick(chosen)
     }
 
   } else if (priorityMode === 'DEVELOP_JUNIORS') {
@@ -331,29 +347,31 @@ function selectPilotsPerStint(
 
     for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
       const stintNumber = stintIdx + 1
-      const locked = stintSlotOccupied[stintNumber] ?? new Set()
+      const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
 
       if (stintNumber === 1 || stintNumber === numStints) {
         // Seniors bookend
-        const available = seniors.filter(p => !locked.has(p.id))
-        result.push(available[0] ?? bestFor(stintNumber))
+        const idealSeniors = seniors.filter(p => !lockedSlot.has(p.id) && !pickedInThisCar.has(p.id))
+        const acceptableSeniors = seniors.filter(p => !lockedSlot.has(p.id))
+        pick(idealSeniors[0] ?? acceptableSeniors[0] ?? bestFor(stintNumber))
       } else {
         // Junior in middle
-        const available = juniors.filter(p => !locked.has(p.id))
-        result.push(available[0] ?? bestFor(stintNumber))
+        const idealJuniors = juniors.filter(p => !lockedSlot.has(p.id) && !pickedInThisCar.has(p.id))
+        const acceptableJuniors = juniors.filter(p => !lockedSlot.has(p.id))
+        pick(idealJuniors[0] ?? acceptableJuniors[0] ?? bestFor(stintNumber))
       }
     }
 
   } else {
     // Fallback
     for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
-      result.push(bestFor(stintIdx + 1))
+      pick(bestFor(stintIdx + 1))
     }
   }
 
-  // Safety: ensure we have exactly numStints pilots
+  // Safety: fill remaining slots if needed
   while (result.length < numStints) {
-    result.push(bestFor(result.length + 1))
+    pick(bestFor(result.length + 1))
   }
 
   return result.slice(0, numStints)

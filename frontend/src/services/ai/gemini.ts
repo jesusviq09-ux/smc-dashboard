@@ -49,10 +49,10 @@ export async function analyzeStrategy(payload: AnalysisPayload): Promise<string>
 
   if (!response.ok) {
     if (response.status === 429) {
-      throw new Error('Límite de solicitudes Gemini alcanzado (cuota gratuita). Espera 1 minuto e inténtalo de nuevo.')
+      throw new Error('Cuota Gemini agotada. Ve a https://aistudio.google.com → tu proyecto → activa facturación o espera que se renueve la cuota diaria.')
     }
-    if (response.status === 400) {
-      throw new Error('Clave de API Gemini inválida. Comprueba VITE_GEMINI_API_KEY en Vercel.')
+    if (response.status === 400 || response.status === 403) {
+      throw new Error('Clave de API Gemini inválida o sin permisos. Comprueba VITE_GEMINI_API_KEY en Vercel → Settings → Environment Variables.')
     }
     const err = await response.text().catch(() => response.statusText)
     throw new Error(`Error Gemini ${response.status}: ${err}`)
