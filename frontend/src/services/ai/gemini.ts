@@ -10,60 +10,67 @@ export interface AnalysisPayload {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+// Uses OpenRouter (https://openrouter.ai) — free tier, no billing required.
+// Model: meta-llama/llama-3.1-8b-instruct:free
+// Limits (free): 20 req/min, 200 req/day — no credit card needed.
+// Get a free key at: https://openrouter.ai/keys
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY as string | undefined
-const GEMINI_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
+const AI_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const MODEL = 'meta-llama/llama-3.1-8b-instruct:free'
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/** Returns true only if a Gemini API key is configured */
+/** Returns true only if an OpenRouter API key is configured */
 export function isGeminiAvailable(): boolean {
-  return !!GEMINI_API_KEY && GEMINI_API_KEY.trim().length > 0
+  return !!AI_API_KEY && AI_API_KEY.trim().length > 0
 }
 
 /**
- * Sends the race strategy to Gemini 1.5 Flash and returns a tactical
- * analysis in Spanish (3-5 sentences).
+ * Sends the race strategy to OpenRouter (Llama 3.1 8B free) and returns
+ * a tactical analysis in Spanish (3-4 sentences).
  *
- * Throws on network error or Gemini API error — caller should handle.
+ * Throws on network error or API error — caller should handle.
  */
 export async function analyzeStrategy(payload: AnalysisPayload): Promise<string> {
-  if (!GEMINI_API_KEY) {
-    throw new Error('VITE_GEMINI_API_KEY no configurada')
+  if (!AI_API_KEY) {
+    throw new Error('VITE_OPENROUTER_API_KEY no configurada')
   }
 
   const prompt = buildPrompt(payload)
 
-  const response = await fetch(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+  const response = await fetch(OPENROUTER_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${AI_API_KEY}`,
+      'HTTP-Referer': 'https://smc-dashboard.vercel.app',
+      'X-Title': 'SMC Dashboard',
+    },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 512,
-      },
+      model: MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 400,
+      temperature: 0.7,
     }),
   })
 
   if (!response.ok) {
     if (response.status === 429) {
-      throw new Error('Cuota Gemini agotada. Ve a https://aistudio.google.com → tu proyecto → activa facturación o espera que se renueve la cuota diaria.')
+      throw new Error('Límite de solicitudes alcanzado (200/día en tier gratuito). Inténtalo mañana o consigue más créditos en openrouter.ai.')
     }
-    if (response.status === 400 || response.status === 403) {
-      throw new Error('Clave de API Gemini inválida o sin permisos. Comprueba VITE_GEMINI_API_KEY en Vercel → Settings → Environment Variables.')
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Clave de API inválida. Comprueba VITE_OPENROUTER_API_KEY en Vercel → Settings → Environment Variables.')
     }
     const err = await response.text().catch(() => response.statusText)
-    throw new Error(`Error Gemini ${response.status}: ${err}`)
+    throw new Error(`Error IA ${response.status}: ${err}`)
   }
 
   const data = await response.json()
-  const text: string | undefined =
-    data?.candidates?.[0]?.content?.parts?.[0]?.text
+  const text: string | undefined = data?.choices?.[0]?.message?.content
 
   if (!text) {
-    throw new Error('Gemini no devolvió texto')
+    throw new Error('La IA no devolvió texto')
   }
 
   return text.trim()
