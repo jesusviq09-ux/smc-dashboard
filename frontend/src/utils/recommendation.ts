@@ -109,16 +109,8 @@ export function generateRecommendation(input: RecommendationInput): Recommendati
 
 // ─── Dynamic stint count ──────────────────────────────────────────────────────
 
-export function calcNumStints(durationMinutes: number, circuit?: Circuit): number {
-  const technical = circuit?.demandingTechnical ?? 5
-  const physical = circuit?.demandingPhysical ?? 5
-
-  if (durationMinutes >= 80) {
-    // F24 (90 min)
-    if (technical >= 7 || physical >= 7) return 4
-    return 3
-  }
-  // F24+ (60 min) — always 3 stints
+export function calcNumStints(_durationMinutes: number, _circuit?: Circuit): number {
+  // Always 3 stints regardless of duration or circuit
   return 3
 }
 
