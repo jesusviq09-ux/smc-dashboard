@@ -48,8 +48,14 @@ export async function analyzeStrategy(payload: AnalysisPayload): Promise<string>
   })
 
   if (!response.ok) {
+    if (response.status === 429) {
+      throw new Error('Límite de solicitudes Gemini alcanzado (cuota gratuita). Espera 1 minuto e inténtalo de nuevo.')
+    }
+    if (response.status === 400) {
+      throw new Error('Clave de API Gemini inválida. Comprueba VITE_GEMINI_API_KEY en Vercel.')
+    }
     const err = await response.text().catch(() => response.statusText)
-    throw new Error(`Gemini API error ${response.status}: ${err}`)
+    throw new Error(`Error Gemini ${response.status}: ${err}`)
   }
 
   const data = await response.json()

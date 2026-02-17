@@ -44,7 +44,7 @@ export function generateRecommendation(input: RecommendationInput): Recommendati
     warnings.push(`Solo ${eligible.length} piloto(s) elegible(s). Se necesitan al menos 2.`)
   }
 
-  // 2. Calculate dynamic stint count and durations
+  // 2. Fixed 3 stints with variable durations
   const numStints = calcNumStints(durationMinutes, circuit)
   const stintDurations = calcStintDurations(durationMinutes, numStints, circuit)
 
@@ -68,8 +68,10 @@ export function generateRecommendation(input: RecommendationInput): Recommendati
     }
   })
 
-  // 5. Track which stint slots are occupied (stintNumber → Set of pilotIds)
-  // A pilot cannot drive the SAME stint number in two different cars simultaneously
+  // 5. Global constraint: stintSlotOccupied[stintNumber] → Set of pilotIds already
+  //    assigned to that stint slot in ANY car.
+  //    A pilot CANNOT drive in the same stint number in two different cars at the same time.
+  //    (A pilot CAN do stint 1 in Car A and stint 2 in Car B — those are different time slots.)
   const stintSlotOccupied: Record<number, Set<string>> = {}
   for (let n = 1; n <= numStints; n++) stintSlotOccupied[n] = new Set()
 
@@ -110,7 +112,7 @@ export function generateRecommendation(input: RecommendationInput): Recommendati
 // ─── Dynamic stint count ──────────────────────────────────────────────────────
 
 export function calcNumStints(_durationMinutes: number, _circuit?: Circuit): number {
-  // Always 3 stints regardless of duration or circuit
+  // Always 3 stints
   return 3
 }
 
@@ -185,11 +187,9 @@ function calcRoleScore(
   const ca = pilot.circuitBonus
 
   if (role === 'speed') {
-    // Prioritise drivers who are fast and adaptable
     return r.driving * 0.40 + r.adaptation * 0.20 + r.experience * 0.10 + ca + va
   }
   if (role === 'endurance') {
-    // Prioritise consistency and energy management
     return r.energyManagement * 0.40 + r.consistency * 0.30 + r.experience * 0.20 + ca + va
   }
   // balanced
@@ -219,8 +219,16 @@ function buildStints({
   circuit,
   warnings,
 }: BuildStintsInput) {
-  // Choose pilot order based on priority mode
-  const orderedPilots = selectPilotOrder(rolePilots, numStints, priorityMode, warnings, vehicle.name)
+  // Select one pilot per stint, respecting the simultaneity constraint.
+  // stintSlotOccupied is shared across all vehicles and updated as we assign.
+  const orderedPilots = selectPilotsPerStint(
+    rolePilots,
+    numStints,
+    priorityMode,
+    stintSlotOccupied,
+    warnings,
+    vehicle.name
+  )
 
   const stints = orderedPilots.map((pilot, idx) => {
     const stintNumber = idx + 1
@@ -229,7 +237,7 @@ function buildStints({
     const energyFactor = objective === 'AGGRESSIVE' ? 1.2 : objective === 'CONSERVATIVE' ? 0.75 : 1.0
     const estimatedEnergyWh = ENERGY_PER_STINT_WH * energyFactor * (durationMinutes / 20)
 
-    // Mark this slot as used
+    // Lock this pilot into this slot so no other car can use them at the same time
     stintSlotOccupied[stintNumber].add(pilot.id)
 
     return {
@@ -245,69 +253,107 @@ function buildStints({
   return stints
 }
 
-// ─── Pilot ordering by priority mode ─────────────────────────────────────────
+// ─── Pilot selection per stint (with simultaneity constraint) ─────────────────
+//
+// Key rule: for each stintNumber, we cannot use a pilot already locked in
+// that slot by another car (stintSlotOccupied[stintNumber]).
+// Within a single car, a pilot CAN repeat across different stints.
 
-function selectPilotOrder(
+function selectPilotsPerStint(
   pilots: ScoredPilot[],
   numStints: number,
   priorityMode: RacePriorityMode,
+  stintSlotOccupied: Record<number, Set<string>>,
   warnings: string[],
   vehicleName: string
 ): ScoredPilot[] {
-  const result: ScoredPilot[] = []
-  const used = new Set<string>()
+  // Helper: best available pilot for a given stint slot
+  const bestFor = (stintNumber: number, prefer?: (p: ScoredPilot) => boolean): ScoredPilot => {
+    const locked = stintSlotOccupied[stintNumber] ?? new Set()
+    const available = pilots.filter(p => !locked.has(p.id))
+    const pool = available.length > 0 ? available : pilots  // fallback: reuse if no option
 
-  const pickBest = (pool: ScoredPilot[], exclude = used): ScoredPilot | undefined =>
-    pool.find(p => !exclude.has(p.id))
+    if (prefer) {
+      const preferred = pool.filter(prefer)
+      if (preferred.length > 0) return preferred[0]
+    }
+    return pool[0]
+  }
+
+  const result: ScoredPilot[] = []
 
   if (priorityMode === 'WIN') {
-    // Best pilot closes (last stint), second opens, rest in middle
-    const sorted = [...pilots]
-    const closer = sorted[0]
-    const opener = sorted[1] ?? sorted[0]
+    // Stint 1: second-best opener; last: best closer; middle: best available each slot
+    // We work slot by slot so stintSlotOccupied is respected per position
+    const topPilot = pilots[0]
+    const secondPilot = pilots[1] ?? pilots[0]
 
-    if (numStints === 2) {
-      result.push(opener, closer)
-    } else {
-      result.push(opener)
-      used.add(opener.id)
-      // Fill middle with best available
-      for (let i = 1; i < numStints - 1; i++) {
-        const mid = pickBest(sorted) ?? sorted[0]
-        result.push(mid)
-        used.add(mid.id)
+    for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
+      const stintNumber = stintIdx + 1
+      const locked = stintSlotOccupied[stintNumber] ?? new Set()
+
+      if (stintNumber === numStints) {
+        // Best pilot closes — if locked, pick next best available
+        const available = pilots.filter(p => !locked.has(p.id))
+        result.push(available[0] ?? topPilot)
+      } else if (stintNumber === 1) {
+        // Second best opens
+        const available = pilots.filter(p => !locked.has(p.id))
+        // Pick second-best not already used as closer
+        result.push(available.find(p => p.id !== topPilot.id) ?? available[0] ?? secondPilot)
+      } else {
+        // Middle: best available
+        result.push(bestFor(stintNumber))
       }
-      result.push(closer)
     }
+
   } else if (priorityMode === 'FINISH') {
-    // Most consistent and energy-efficient pilots
-    const consistent = [...pilots].sort((a, b) =>
+    // Most consistent pilots — one per slot, round-robin if fewer pilots than stints
+    const sorted = [...pilots].sort((a, b) =>
       (b.ratings.consistency + b.ratings.energyManagement) -
       (a.ratings.consistency + a.ratings.energyManagement)
     )
-    for (let i = 0; i < numStints; i++) {
-      result.push(consistent[i % consistent.length])
+    for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
+      const stintNumber = stintIdx + 1
+      const locked = stintSlotOccupied[stintNumber] ?? new Set()
+      const available = sorted.filter(p => !locked.has(p.id))
+      result.push(available[0] ?? sorted[stintIdx % sorted.length])
     }
+
   } else if (priorityMode === 'DEVELOP_JUNIORS') {
     const juniors = pilots.filter(p => p.age < 16)
     const seniors = pilots.filter(p => p.age >= 16)
 
     if (juniors.length === 0) {
       warnings.push(`No hay pilotos junior para "${vehicleName}". Usando modo FINISH.`)
-      return selectPilotOrder(pilots, numStints, 'FINISH', warnings, vehicleName)
+      return selectPilotsPerStint(pilots, numStints, 'FINISH', stintSlotOccupied, warnings, vehicleName)
     }
 
-    // Seniors bookend, juniors in middle
-    result.push(seniors[0] ?? juniors[0])
-    for (let i = 1; i < numStints - 1; i++) {
-      result.push(juniors[(i - 1) % juniors.length])
+    for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
+      const stintNumber = stintIdx + 1
+      const locked = stintSlotOccupied[stintNumber] ?? new Set()
+
+      if (stintNumber === 1 || stintNumber === numStints) {
+        // Seniors bookend
+        const available = seniors.filter(p => !locked.has(p.id))
+        result.push(available[0] ?? bestFor(stintNumber))
+      } else {
+        // Junior in middle
+        const available = juniors.filter(p => !locked.has(p.id))
+        result.push(available[0] ?? bestFor(stintNumber))
+      }
     }
-    result.push(seniors[1] ?? seniors[0] ?? juniors[0])
+
+  } else {
+    // Fallback
+    for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
+      result.push(bestFor(stintIdx + 1))
+    }
   }
 
-  // Fallback: fill any missing slots
+  // Safety: ensure we have exactly numStints pilots
   while (result.length < numStints) {
-    result.push(pilots[result.length % pilots.length] ?? pilots[0])
+    result.push(bestFor(result.length + 1))
   }
 
   return result.slice(0, numStints)
