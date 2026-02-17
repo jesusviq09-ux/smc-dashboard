@@ -25,6 +25,12 @@ export function useRaceTimer({ durationSeconds, onStintAlert, stintAlertTimes = 
 
   const workerRef = useRef<Worker | null>(null)
   const alertedTimesRef = useRef<Set<number>>(new Set())
+  const onStintAlertRef = useRef(onStintAlert)
+  const stintAlertTimesRef = useRef(stintAlertTimes)
+
+  // Keep refs in sync without recreating the worker
+  useEffect(() => { onStintAlertRef.current = onStintAlert }, [onStintAlert])
+  useEffect(() => { stintAlertTimesRef.current = stintAlertTimes }, [stintAlertTimes])
 
   useEffect(() => {
     // Create inline worker for accurate timing
@@ -54,12 +60,13 @@ export function useRaceTimer({ durationSeconds, onStintAlert, stintAlertTimes = 
           const remaining = Math.max(0, durationSeconds - elapsed)
           const isFinished = elapsed >= durationSeconds
 
-          // Check stint alerts
-          if (onStintAlert) {
-            for (const alertTime of stintAlertTimes) {
+          // Check stint alerts using refs to avoid stale closure
+          const alertFn = onStintAlertRef.current
+          if (alertFn) {
+            for (const alertTime of stintAlertTimesRef.current) {
               if (elapsed >= alertTime && !alertedTimesRef.current.has(alertTime)) {
                 alertedTimesRef.current.add(alertTime)
-                onStintAlert(elapsed)
+                alertFn(elapsed)
               }
             }
           }
@@ -77,7 +84,7 @@ export function useRaceTimer({ durationSeconds, onStintAlert, stintAlertTimes = 
       workerRef.current?.postMessage({ type: 'STOP' })
       workerRef.current?.terminate()
     }
-  }, [durationSeconds, onStintAlert]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [durationSeconds]) // Only recreate worker when duration changes
 
   const start = useCallback((resumeFromElapsed?: number) => {
     const now = Date.now()

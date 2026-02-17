@@ -1,9 +1,10 @@
 import { useForm, Controller } from 'react-hook-form'
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
 import { ChevronLeft, Save } from 'lucide-react'
 import { raceApi } from '@/services/api/race.api'
+import { circuitsApi } from '@/services/api/circuits.api'
 import { Card, CardContent } from '@/components/ui/Card'
 import { RaceCategory } from '@/types'
 
@@ -25,8 +26,17 @@ export default function NewRace() {
 
   const categories = watch('categories')
 
+  const { data: circuits = [] } = useQuery({
+    queryKey: ['circuits'],
+    queryFn: circuitsApi.getAll,
+  })
+
   const mutation = useMutation({
-    mutationFn: (data: any) => raceApi.createEvent({ ...data, status: 'planned' }),
+    mutationFn: (data: any) => raceApi.createEvent({
+      ...data,
+      circuitId: data.circuitId || undefined,
+      status: 'planned',
+    }),
     onSuccess: (event) => {
       queryClient.invalidateQueries({ queryKey: ['race-events'] })
       navigate(`/races/${event.id}`)
@@ -62,6 +72,22 @@ export default function NewRace() {
               <Controller name="date" control={control} render={({ field }) => (
                 <input type="datetime-local" {...field} className="input-field" />
               )} />
+            </div>
+            <div>
+              <label className="label">Circuito</label>
+              <Controller name="circuitId" control={control} render={({ field }) => (
+                <select {...field} className="input-field">
+                  <option value="">— Sin circuito —</option>
+                  {circuits.map(c => (
+                    <option key={c.id} value={c.id}>{c.name} ({c.city})</option>
+                  ))}
+                </select>
+              )} />
+              {circuits.length === 0 && (
+                <p className="text-xs text-smc-muted mt-1">
+                  No hay circuitos. <Link to="/circuits/new" className="text-primary underline">Crear uno</Link>
+                </p>
+              )}
             </div>
             <div>
               <label className="label">Condiciones climáticas</label>

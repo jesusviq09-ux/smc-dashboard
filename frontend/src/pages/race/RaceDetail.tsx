@@ -4,6 +4,7 @@ import { ChevronLeft, Play, Settings, Zap, AlertCircle, Trash2, Minus, Plus } fr
 import { useState } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
+import { circuitsApi } from '@/services/api/circuits.api'
 import { Card, CardContent } from '@/components/ui/Card'
 import { generateRecommendation } from '@/utils/recommendation'
 import { db } from '@/services/indexeddb/db'
@@ -46,6 +47,12 @@ export default function RaceDetail() {
 
   const vehicles = useLiveQuery(() => db.vehicles.toArray(), [])
 
+  const { data: circuit } = useQuery({
+    queryKey: ['circuit', race?.circuitId],
+    queryFn: () => circuitsApi.getById(race!.circuitId!),
+    enabled: !!race?.circuitId,
+  })
+
   const deleteMutation = useMutation({
     mutationFn: () => raceApi.deleteEvent(id!),
     onSuccess: () => {
@@ -75,6 +82,7 @@ export default function RaceDetail() {
       vehicles,
       pilots,
       priorityMode,
+      circuit: circuit ?? undefined,
     })
 
     setRecommendation(result)
@@ -149,6 +157,13 @@ export default function RaceDetail() {
             <p className="text-xs text-smc-muted">{cat === 'F24+' ? '60 min' : '90 min'}</p>
           </div>
         ))}
+        {circuit && (
+          <div className="stat-card">
+            <p className="text-xs text-smc-muted">Circuito</p>
+            <p className="font-medium text-white">{circuit.name}</p>
+            <p className="text-xs text-smc-muted">{circuit.city}</p>
+          </div>
+        )}
         {race.weatherConditions && (
           <div className="stat-card">
             <p className="text-xs text-smc-muted">Clima</p>

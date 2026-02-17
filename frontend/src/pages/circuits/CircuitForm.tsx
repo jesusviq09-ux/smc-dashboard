@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, Link } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, Save } from 'lucide-react'
 import { circuitsApi } from '@/services/api/circuits.api'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -13,6 +14,7 @@ export default function CircuitForm() {
   const { id } = useParams<{ id: string }>()
   const isEditing = !!id
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const [form, setForm] = useState({
     name: '', city: '', country: '', lengthMeters: 1000,
@@ -70,8 +72,11 @@ export default function CircuitForm() {
       }
       if (isEditing) {
         await circuitsApi.update(id!, payload as any)
+        queryClient.invalidateQueries({ queryKey: ['circuits'] })
+        queryClient.invalidateQueries({ queryKey: ['circuit', id] })
       } else {
         await circuitsApi.create(payload as any)
+        queryClient.invalidateQueries({ queryKey: ['circuits'] })
       }
       navigate('/circuits')
     } catch (err: any) {

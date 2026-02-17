@@ -18,6 +18,7 @@ export default function CircuitDetail() {
     queryKey: ['circuit', id],
     queryFn: () => circuitsApi.getById(id!),
     enabled: !!id,
+    staleTime: 0,
   })
 
   const { data: records = [] } = useQuery({
