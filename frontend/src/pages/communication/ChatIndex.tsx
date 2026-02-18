@@ -43,15 +43,28 @@ export default function ChatIndex() {
     if (!text.trim()) return
     const content = text.trim()
     setText('')
+    // Optimistic update — show message immediately without waiting for server/socket
+    const tempId = `temp_${Date.now()}`
+    const tempMsg = {
+      id: tempId,
+      senderName: currentUser?.name ?? 'Equipo',
+      senderId: currentUser?.id ?? 'team',
+      content,
+      eventId: channel,
+      timestamp: new Date().toISOString(),
+    }
+    setMessages(prev => [...prev, tempMsg as any])
     try {
-      await communicationApi.sendMessage({
+      const saved = await communicationApi.sendMessage({
         senderName: currentUser?.name ?? 'Equipo',
         senderId: currentUser?.id ?? 'team',
         content,
         eventId: channel,
       } as any)
+      // Replace temp message with real one (has real id from server)
+      setMessages(prev => prev.map(m => (m as any).id === tempId ? saved : m))
     } catch {
-      // Socket.io fallback — message already shown optimistically via socket
+      // Keep the optimistic message visible even if server call fails
     }
   }
 
@@ -68,7 +81,7 @@ export default function ChatIndex() {
         <div className="flex gap-1">
           {CHANNELS.map(c => (
             <button key={c.id} onClick={() => setChannel(c.id)}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${channel === c.id ? 'bg-primary text-smc-dark' : 'bg-smc-card text-smc-muted hover:text-smc-text'}`}>
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${channel === c.id ? 'bg-primary text-white' : 'bg-smc-card text-smc-muted hover:text-smc-text'}`}>
               {c.label}
             </button>
           ))}
@@ -90,7 +103,7 @@ export default function ChatIndex() {
             <div>
               <div className="flex items-baseline gap-2">
                 <span className="text-sm font-semibold text-white">{msg.senderName}</span>
-                <span className="text-xs text-smc-muted">{new Date(msg.timestamp).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="text-xs text-smc-muted">{new Date(msg.createdAt ?? msg.timestamp ?? '').toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
               <p className="text-sm text-smc-text mt-0.5">{msg.content}</p>
             </div>

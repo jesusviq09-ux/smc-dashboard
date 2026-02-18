@@ -1,4 +1,4 @@
-import { Circuit, Pilot, RecommendationOutput, RacePriorityMode, RaceCategory } from '@/types'
+import { Circuit, Pilot, RecommendationOutput, RacePriorityMode, RaceCategory, StintObjective } from '@/types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -7,6 +7,24 @@ export interface AnalysisPayload {
   input: { category: RaceCategory; durationMinutes: number; priorityMode: RacePriorityMode }
   circuit?: Circuit
   pilots: Pilot[]
+}
+
+export interface AIStrategyOutput {
+  /** Tactical analysis text (3-4 sentences in Spanish) */
+  analysis: string
+  /** Suggested alternative strategy — present only if AI could generate a valid one */
+  suggestedStrategy?: {
+    vehicleAssignments: {
+      vehicleId: string
+      stints: {
+        stintNumber: number
+        pilotId: string
+        plannedDurationMinutes: number
+        objective: StintObjective
+        justification: string
+      }[]
+    }[]
+  }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -28,11 +46,11 @@ export function isGeminiAvailable(): boolean {
 
 /**
  * Sends the race strategy to OpenRouter (Gemma 3n free) and returns
- * a tactical analysis in Spanish (3-4 sentences).
+ * an analysis + an optional suggested alternative strategy.
  *
  * Throws on network error or API error — caller should handle.
  */
-export async function analyzeStrategy(payload: AnalysisPayload): Promise<string> {
+export async function analyzeStrategy(payload: AnalysisPayload): Promise<AIStrategyOutput> {
   if (!AI_API_KEY) {
     throw new Error('VITE_OPENROUTER_API_KEY no configurada')
   }
@@ -50,7 +68,7 @@ export async function analyzeStrategy(payload: AnalysisPayload): Promise<string>
     body: JSON.stringify({
       model: MODEL,
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 400,
+      max_tokens: 800,
       temperature: 0.7,
     }),
   })
@@ -62,8 +80,8 @@ export async function analyzeStrategy(payload: AnalysisPayload): Promise<string>
     if (response.status === 401 || response.status === 403) {
       throw new Error('Clave de API inválida. Comprueba VITE_OPENROUTER_API_KEY en Vercel → Settings → Environment Variables.')
     }
-    const err = await response.text().catch(() => response.statusText)
-    throw new Error(`Error IA ${response.status}: ${err}`)
+    const errBody = await response.text().catch(() => response.statusText)
+    throw new Error(`Error IA ${response.status}: ${errBody}`)
   }
 
   const data = await response.json()
@@ -73,7 +91,48 @@ export async function analyzeStrategy(payload: AnalysisPayload): Promise<string>
     throw new Error('La IA no devolvió texto')
   }
 
-  return text.trim()
+  return parseAIResponse(text.trim(), payload)
+}
+
+// ─── Response parser ──────────────────────────────────────────────────────────
+// The AI returns a JSON block. If parsing fails, we fall back to plain text analysis.
+
+function parseAIResponse(raw: string, payload: AnalysisPayload): AIStrategyOutput {
+  // Extract JSON block from the response (may be wrapped in markdown code fences)
+  const jsonMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/) ?? raw.match(/(\{[\s\S]*\})/)
+  const jsonStr = jsonMatch ? (jsonMatch[1] ?? jsonMatch[0]) : null
+
+  if (jsonStr) {
+    try {
+      const parsed = JSON.parse(jsonStr)
+      const analysis: string = parsed.analysis ?? raw
+      const suggested = parsed.suggestedStrategy
+
+      // Validate suggested strategy: all pilotIds must exist in payload.pilots
+      if (suggested?.vehicleAssignments?.length) {
+        const validPilotIds = new Set(payload.pilots.map(p => p.id))
+        const validVehicleIds = new Set(
+          payload.recommendation.vehicleAssignments.map(a => a.vehicle.id)
+        )
+        const allValid = suggested.vehicleAssignments.every((va: any) =>
+          validVehicleIds.has(va.vehicleId) &&
+          Array.isArray(va.stints) &&
+          va.stints.every((s: any) => validPilotIds.has(s.pilotId))
+        )
+        if (allValid) {
+          return { analysis, suggestedStrategy: suggested }
+        }
+      }
+
+      // JSON parsed but no valid strategy → return analysis only
+      return { analysis }
+    } catch {
+      // JSON parse failed → fall through to plain text
+    }
+  }
+
+  // Fallback: treat entire response as analysis text
+  return { analysis: raw }
 }
 
 // ─── Prompt builder ───────────────────────────────────────────────────────────
@@ -100,11 +159,11 @@ function buildPrompt(payload: AnalysisPayload): string {
           const ratingStr = r
             ? `driving ${r.driving}/10, energía ${r.energyManagement}/10, consistencia ${r.consistency}/10, exp ${r.experience}/10`
             : ''
-          return `  Stint ${s.stintNumber} (${s.plannedDurationMinutes} min, ${s.objective}): ${pilot.fullName}${ratingStr ? ` — ${ratingStr}` : ''}`
+          return `  Stint ${s.stintNumber} (${s.plannedDurationMinutes} min, ${s.objective}): ${pilot.fullName} [id:${pilot.id}]${ratingStr ? ` — ${ratingStr}` : ''}`
         })
         .join('\n')
       return [
-        `Coche: ${a.vehicle.name} (${a.vehicle.material}, ${a.vehicle.weightKg} kg)`,
+        `Coche: ${a.vehicle.name} [id:${a.vehicle.id}] (${a.vehicle.material}, ${a.vehicle.weightKg} kg)`,
         stintLines,
         `  Energía total estimada: ${a.totalEnergyEstimateWh} Wh`,
         `  Probabilidad de finalizar: ${(a.finishProbability * 100).toFixed(0)}%`,
@@ -112,12 +171,23 @@ function buildPrompt(payload: AnalysisPayload): string {
     })
     .join('\n\n')
 
+  const pilotsAvailableInfo = pilots
+    .map(p => {
+      const r = p.ratings
+      return `  ${p.fullName} [id:${p.id}] — driving ${r.driving}/10, energía ${r.energyManagement}/10, consistencia ${r.consistency}/10, exp ${r.experience}/10, ${p.weightKg}kg`
+    })
+    .join('\n')
+
   const warningsStr =
     recommendation.warnings.length > 0
       ? `\nADVERTENCIAS: ${recommendation.warnings.join('; ')}`
       : ''
 
-  return `Eres un estratega experto en karting eléctrico F24/F24+. Analiza la siguiente estrategia de carrera y da 3-4 sugerencias tácticas concretas y útiles en español. Sé directo y técnico. No repitas los datos que ya aparecen, añade valor real.
+  return `Eres un estratega experto en karting eléctrico F24/F24+. Analiza la estrategia de carrera y genera una respuesta en formato JSON con:
+1. "analysis": 3-4 frases tácticas concretas y útiles en español. Sé directo y técnico. No repitas los datos, añade valor real.
+2. "suggestedStrategy": una estrategia alternativa mejorada usando los MISMOS IDs de pilotos y coches que se te proporcionan (no inventes IDs nuevos). Solo incluye cambios si realmente mejoran la estrategia.
+
+IMPORTANTE: Usa exactamente los IDs tal como aparecen entre [id:...] en los datos.
 
 DATOS DE LA CARRERA
 -------------------
@@ -125,10 +195,36 @@ Categoría: ${input.category} (${input.durationMinutes} min)
 Modo de prioridad: ${input.priorityMode}
 ${circuitInfo}
 
-ESTRATEGIA GENERADA
+PILOTOS DISPONIBLES
 -------------------
+${pilotsAvailableInfo}
+
+ESTRATEGIA ACTUAL
+-----------------
 ${carsInfo}
 ${warningsStr}
 
-Responde con 3-4 frases cortas y concretas. Sin encabezados ni viñetas, solo párrafo continuo.`
+Responde ÚNICAMENTE con un bloque JSON válido, sin texto adicional fuera del JSON:
+
+\`\`\`json
+{
+  "analysis": "Texto de análisis táctico aquí.",
+  "suggestedStrategy": {
+    "vehicleAssignments": [
+      {
+        "vehicleId": "id-del-coche",
+        "stints": [
+          {
+            "stintNumber": 1,
+            "pilotId": "id-del-piloto",
+            "plannedDurationMinutes": 36,
+            "objective": "CONSERVATIVE",
+            "justification": "Razón breve"
+          }
+        ]
+      }
+    ]
+  }
+}
+\`\`\``
 }

@@ -351,8 +351,9 @@ export interface Message {
   senderId: string
   senderName: string
   content: string
-  eventId?: string  // null = general channel
-  timestamp: string
+  eventId?: string   // null = general channel
+  timestamp?: string // generado localmente (offline / optimistic)
+  createdAt?: string // generado por el servidor (Sequelize timestamps)
   attachments?: MessageAttachment[]
   mentions?: string[]
 }

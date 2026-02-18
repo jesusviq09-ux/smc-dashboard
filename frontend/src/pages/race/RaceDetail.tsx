@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ChevronLeft, Play, Zap, AlertCircle, Trash2, Minus, Plus, BrainCircuit, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
+import { ChevronLeft, Play, Zap, AlertCircle, Trash2, Minus, Plus, BrainCircuit, ChevronDown, ChevronUp, Loader2, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
@@ -12,9 +12,9 @@ import { db } from '@/services/indexeddb/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { RacePriorityMode } from '@/types'
+import { RaceCategory, RacePriorityMode } from '@/types'
 import { analyzeStrategy, isGeminiAvailable } from '@/services/ai/gemini'
-import type { AnalysisPayload } from '@/services/ai/gemini'
+import type { AnalysisPayload, AIStrategyOutput } from '@/services/ai/gemini'
 
 const PRIORITY_MODES: { value: RacePriorityMode; label: string; desc: string }[] = [
   { value: 'WIN', label: 'Ganar carrera', desc: 'Mejores pilotos en stints clave' },
@@ -30,10 +30,12 @@ export default function RaceDetail() {
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [strategyTab, setStrategyTab] = useState<'auto' | 'manual'>('auto')
-  const [aiAnalysis, setAiAnalysis] = useState<string | null>(null)
+  const [aiResult, setAiResult] = useState<AIStrategyOutput | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiExpanded, setAiExpanded] = useState(true)
+  // Active category for dual-category races
+  const [activeCategory, setActiveCategory] = useState<RaceCategory | null>(null)
   const queryClient = useQueryClient()
 
   const { data: race, isLoading } = useQuery({
@@ -78,10 +80,24 @@ export default function RaceDetail() {
   if (isLoading) return <div className="skeleton h-96 rounded-xl" />
   if (!race) return <p className="text-smc-muted">Carrera no encontrada</p>
 
-  const category = race.categories.includes('F24') ? 'F24' : 'F24+'
+  // ── Category handling ────────────────────────────────────────────────────────
+  const hasMultipleCategories = race.categories.length > 1
+  // Derive active category: state if set, otherwise first in array
+  const category: RaceCategory = hasMultipleCategories
+    ? (activeCategory ?? race.categories[0])
+    : race.categories[0]
   const durationMinutes = category === 'F24+' ? 60 : 90
   const expectedStints = calcNumStints(durationMinutes, circuit ?? undefined)
 
+  const handleCategoryChange = (cat: RaceCategory) => {
+    setActiveCategory(cat)
+    // Reset strategy and AI when switching category
+    setRecommendation(null)
+    setAiResult(null)
+    setAiError(null)
+  }
+
+  // ── Strategy generation ──────────────────────────────────────────────────────
   const handleGenerateStrategy = () => {
     if (!vehicles || !pilots.length) return
 
@@ -96,10 +112,11 @@ export default function RaceDetail() {
 
     setRecommendation(result)
     // Reset AI analysis when strategy is regenerated
-    setAiAnalysis(null)
+    setAiResult(null)
     setAiError(null)
   }
 
+  // ── Save strategy ────────────────────────────────────────────────────────────
   const handleSaveStrategy = async () => {
     if (!recommendation || !id) return
     setSaving(true)
@@ -108,7 +125,7 @@ export default function RaceDetail() {
         await raceApi.saveStrategy({
           raceId: id,
           vehicleId: assignment.vehicle.id,
-          category: race.categories[0],
+          category,
           priorityMode,
           stints: assignment.stints.map(s => ({
             id: crypto.randomUUID(),
@@ -131,6 +148,7 @@ export default function RaceDetail() {
     }
   }
 
+  // ── AI analysis ──────────────────────────────────────────────────────────────
   const handleAnalyzeWithAI = async () => {
     if (!recommendation) return
     setAiLoading(true)
@@ -143,12 +161,46 @@ export default function RaceDetail() {
         circuit: circuit ?? undefined,
         pilots,
       }
-      const text = await analyzeStrategy(payload)
-      setAiAnalysis(text)
+      const result = await analyzeStrategy(payload)
+      setAiResult(result)
     } catch (err) {
       setAiError(err instanceof Error ? err.message : 'Error desconocido')
     } finally {
       setAiLoading(false)
+    }
+  }
+
+  // ── Apply AI suggested strategy ───────────────────────────────────────────────
+  const handleApplyAISuggestion = () => {
+    if (!aiResult?.suggestedStrategy || !recommendation) return
+
+    // Map AI suggestion back to full RecommendationOutput shape
+    const newAssignments = aiResult.suggestedStrategy.vehicleAssignments.map(aiVA => {
+      const original = recommendation.vehicleAssignments.find(a => a.vehicle.id === aiVA.vehicleId)
+      if (!original) return null
+
+      const newStints = aiVA.stints.map(aiS => {
+        const pilot = pilots.find(p => p.id === aiS.pilotId)
+        if (!pilot) return null
+        return {
+          stintNumber: aiS.stintNumber,
+          pilot,
+          plannedDurationMinutes: aiS.plannedDurationMinutes,
+          objective: aiS.objective,
+          justification: aiS.justification,
+          estimatedEnergyWh: Math.round(200 * (aiS.objective === 'AGGRESSIVE' ? 1.2 : aiS.objective === 'CONSERVATIVE' ? 0.75 : 1.0) * (aiS.plannedDurationMinutes / 20)),
+        }
+      }).filter(Boolean) as typeof original.stints
+
+      return {
+        ...original,
+        stints: newStints,
+      }
+    }).filter(Boolean) as typeof recommendation.vehicleAssignments
+
+    if (newAssignments.length > 0) {
+      setRecommendation({ ...recommendation, vehicleAssignments: newAssignments })
+      setAiResult(null) // Clear AI panel after applying
     }
   }
 
@@ -216,7 +268,27 @@ export default function RaceDetail() {
       {/* Strategy Generator */}
       <Card title="Estrategia">
         <CardContent className="space-y-4">
-          {/* Tabs */}
+
+          {/* ── Dual-category tabs (F24 / F24+) ── */}
+          {hasMultipleCategories && (
+            <div className="flex gap-2 pb-1">
+              {race.categories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => handleCategoryChange(cat)}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors border ${
+                    category === cat
+                      ? 'bg-primary text-white border-primary'
+                      : 'bg-smc-card text-smc-muted border-smc-border hover:border-primary/40 hover:text-smc-text'
+                  }`}
+                >
+                  {cat} · {cat === 'F24+' ? '60 min' : '90 min'}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* ── Auto / Manual tabs ── */}
           <div className="flex border-b border-smc-border -mx-4 px-4">
             {([['auto', 'Automática'], ['manual', 'Manual']] as const).map(([tab, label]) => (
               <button
@@ -237,7 +309,11 @@ export default function RaceDetail() {
           {strategyTab === 'auto' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <p className="text-xs text-smc-muted">Basado en puntuaciones y disponibilidad de pilotos</p>
+                <p className="text-xs text-smc-muted">
+                  {hasMultipleCategories
+                    ? `Pilotos ${category === 'F24+' ? '≥16 años' : '<16 años'} · ${durationMinutes} min`
+                    : 'Basado en puntuaciones y disponibilidad de pilotos'}
+                </p>
                 {/* Dynamic stint hint */}
                 <span className="text-xs text-smc-muted bg-smc-darker border border-smc-border rounded-full px-3 py-1 hidden sm:inline-flex items-center gap-1">
                   <span className="text-primary font-medium">{stintHintParts[0]}</span>
@@ -290,10 +366,20 @@ export default function RaceDetail() {
                     {aiLoading ? 'Analizando...' : 'Analizar con IA'}
                   </button>
                 )}
+                {/* Apply AI suggestion button */}
+                {aiResult?.suggestedStrategy && (
+                  <button
+                    onClick={handleApplyAISuggestion}
+                    className="btn-secondary flex items-center gap-2 border-emerald-500/30 text-emerald-400 hover:border-emerald-500/60 hover:text-emerald-300"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    Aplicar sugerencia IA
+                  </button>
+                )}
               </div>
 
               {/* AI Analysis panel */}
-              {(aiAnalysis || aiError) && (
+              {(aiResult || aiError) && (
                 <div className={`rounded-xl border overflow-hidden transition-all ${
                   aiError ? 'border-danger/30 bg-danger/5' : 'border-violet-500/30 bg-violet-500/5'
                 }`}>
@@ -304,7 +390,7 @@ export default function RaceDetail() {
                     <div className="flex items-center gap-2">
                       <BrainCircuit className={`w-4 h-4 ${aiError ? 'text-danger' : 'text-violet-400'}`} />
                       <span className={`text-sm font-medium ${aiError ? 'text-danger' : 'text-violet-300'}`}>
-                        {aiError ? 'Error en análisis IA' : 'Análisis táctico IA (Gemini)'}
+                        {aiError ? 'Error en análisis IA' : aiResult?.suggestedStrategy ? 'Análisis IA · Estrategia sugerida disponible' : 'Análisis táctico IA'}
                       </span>
                     </div>
                     {aiExpanded ? (
@@ -316,8 +402,13 @@ export default function RaceDetail() {
                   {aiExpanded && (
                     <div className="px-4 pb-4">
                       <p className={`text-sm leading-relaxed ${aiError ? 'text-danger' : 'text-smc-text'}`}>
-                        {aiError ?? aiAnalysis}
+                        {aiError ?? aiResult?.analysis}
                       </p>
+                      {aiResult?.suggestedStrategy && (
+                        <p className="text-xs text-emerald-400 mt-2">
+                          ✓ La IA ha generado una estrategia alternativa. Pulsa "Aplicar sugerencia IA" para reemplazar la actual.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -376,6 +467,7 @@ export default function RaceDetail() {
               race={race}
               vehicles={vehicles}
               pilots={pilots}
+              category={category}
               onSaved={() => setStrategyTab('auto')}
             />
           )}

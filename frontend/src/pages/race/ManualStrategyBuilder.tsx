@@ -4,11 +4,13 @@ import { Pilot, Vehicle, RaceEvent, RaceCategory, StintObjective } from '@/types
 import { Card, CardContent } from '@/components/ui/Card'
 import { raceApi } from '@/services/api/race.api'
 import { useQueryClient } from '@tanstack/react-query'
+import { calcStintDurations } from '@/utils/recommendation'
 
 interface ManualStrategyBuilderProps {
   race: RaceEvent
   vehicles: Vehicle[]
   pilots: Pilot[]
+  category: RaceCategory  // passed from RaceDetail to support dual-category
   onSaved: () => void
 }
 
@@ -32,21 +34,22 @@ const OBJECTIVE_COLORS: Record<StintObjective, string> = {
   AGGRESSIVE: 'text-danger border-danger/30 bg-danger/5',
 }
 
-const DEFAULT_STINT_DURATION = 20
-
-export default function ManualStrategyBuilder({ race, vehicles, pilots, onSaved }: ManualStrategyBuilderProps) {
+export default function ManualStrategyBuilder({ race, vehicles, pilots, category, onSaved }: ManualStrategyBuilderProps) {
   const queryClient = useQueryClient()
-  const category: RaceCategory = race.categories.includes('F24') ? 'F24' : 'F24+'
 
-  // Init board with 3 stints per vehicle
+  // Total race duration depends on category
+  const totalRaceMinutes = category === 'F24+' ? 60 : 90
+
+  // Init board with 3 stints per vehicle, using real proportional durations
   const initBoard = (): BoardState => {
+    const durations = calcStintDurations(totalRaceMinutes, 3)
     const board: BoardState = {}
     for (const v of vehicles) {
-      board[v.id] = [
-        { durationMinutes: DEFAULT_STINT_DURATION, pilotId: null, objective: 'CONSERVATIVE' },
-        { durationMinutes: DEFAULT_STINT_DURATION, pilotId: null, objective: 'BALANCED' },
-        { durationMinutes: DEFAULT_STINT_DURATION, pilotId: null, objective: 'AGGRESSIVE' },
-      ]
+      board[v.id] = durations.map((d, idx) => ({
+        durationMinutes: d,
+        pilotId: null,
+        objective: idx === 0 ? 'CONSERVATIVE' : idx === durations.length - 1 ? 'AGGRESSIVE' : 'BALANCED',
+      }))
     }
     return board
   }
@@ -66,27 +69,61 @@ export default function ManualStrategyBuilder({ race, vehicles, pilots, onSaved 
   // ── Board mutations ────────────────────────────────────────────────────────
 
   const addStint = (vehicleId: string) => {
-    setBoard(prev => ({
-      ...prev,
-      [vehicleId]: [
-        ...prev[vehicleId],
-        { durationMinutes: DEFAULT_STINT_DURATION, pilotId: null, objective: 'BALANCED' },
-      ],
-    }))
+    setBoard(prev => {
+      const stints = prev[vehicleId]
+      if (stints.length >= 8) return prev
+      // Add a 5-min stint and subtract 5 from the last existing stint
+      const newStints = [...stints]
+      const lastIdx = newStints.length - 1
+      if (newStints[lastIdx].durationMinutes > 5) {
+        newStints[lastIdx] = { ...newStints[lastIdx], durationMinutes: newStints[lastIdx].durationMinutes - 5 }
+      }
+      newStints.push({ durationMinutes: 5, pilotId: null, objective: 'BALANCED' })
+      return { ...prev, [vehicleId]: newStints }
+    })
   }
 
   const removeStint = (vehicleId: string) => {
-    setBoard(prev => ({
-      ...prev,
-      [vehicleId]: prev[vehicleId].slice(0, -1),
-    }))
+    setBoard(prev => {
+      const stints = prev[vehicleId]
+      if (stints.length <= 1) return prev
+      // Remove last stint and redistribute its minutes to the new last stint
+      const removedMinutes = stints[stints.length - 1].durationMinutes
+      const newStints = stints.slice(0, -1).map((s, i) =>
+        i === stints.length - 2
+          ? { ...s, durationMinutes: s.durationMinutes + removedMinutes }
+          : s
+      )
+      return { ...prev, [vehicleId]: newStints }
+    })
   }
 
-  const setStintDuration = (vehicleId: string, idx: number, val: number) => {
+  // Adjust duration of one stint and redistribute the delta among other stints
+  // so that the total always equals totalRaceMinutes.
+  const setStintDuration = (vehicleId: string, idx: number, newVal: number) => {
     setBoard(prev => {
       const stints = [...prev[vehicleId]]
-      stints[idx] = { ...stints[idx], durationMinutes: Math.max(5, Math.min(90, val)) }
-      return { ...prev, [vehicleId]: stints }
+      const numStints = stints.length
+      // Min: 5, Max: total - (numStints-1)*5  so others can each be at least 5
+      const maxVal = totalRaceMinutes - (numStints - 1) * 5
+      const clamped = Math.max(5, Math.min(maxVal, newVal))
+      const delta = clamped - stints[idx].durationMinutes
+      if (delta === 0) return prev
+
+      // Distribute -delta among the other stints (last one absorbs remainder)
+      const others = stints.map((_, i) => i).filter(i => i !== idx)
+      const perOther = Math.floor(-delta / others.length)
+      let remainder = -delta - perOther * others.length
+
+      const newStints = stints.map((s, i) => {
+        if (i === idx) return { ...s, durationMinutes: clamped }
+        const isLast = i === others[others.length - 1]
+        const adjust = perOther + (isLast ? remainder : 0)
+        if (isLast) remainder = 0
+        return { ...s, durationMinutes: Math.max(5, s.durationMinutes + adjust) }
+      })
+
+      return { ...prev, [vehicleId]: newStints }
     })
   }
 
@@ -274,13 +311,16 @@ export default function ManualStrategyBuilder({ race, vehicles, pilots, onSaved 
           {vehicles.map(vehicle => {
             const stints = board[vehicle.id] ?? []
             const totalDuration = stints.reduce((s, st) => s + st.durationMinutes, 0)
+            const totalOk = totalDuration === totalRaceMinutes
             return (
               <div key={vehicle.id} className="border border-smc-border rounded-xl overflow-hidden">
                 {/* Header */}
                 <div className="bg-smc-darker px-4 py-3 flex items-center justify-between">
                   <div>
                     <h3 className="font-bold text-white text-sm">{vehicle.name}</h3>
-                    <p className="text-xs text-smc-muted">{stints.length} stints · {totalDuration} min total</p>
+                    <p className={`text-xs ${totalOk ? 'text-smc-muted' : 'text-warning font-medium'}`}>
+                      {stints.length} stints · {totalDuration} / {totalRaceMinutes} min
+                    </p>
                   </div>
                   <div className="flex items-center gap-1">
                     <button
