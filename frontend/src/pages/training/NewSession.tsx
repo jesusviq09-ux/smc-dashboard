@@ -2,51 +2,96 @@ import { useForm, Controller } from 'react-hook-form'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, Link } from 'react-router-dom'
-import { ChevronLeft, Save, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, AlertTriangle } from 'lucide-react'
 import { trainingApi } from '@/services/api/training.api'
 import { pilotsApi } from '@/services/api/pilots.api'
 import { db } from '@/services/indexeddb/db'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Card, CardContent } from '@/components/ui/Card'
 import { TrainingObjective } from '@/types'
+import TrainingScheduleBuilder from './TrainingScheduleBuilder'
 
-const OBJECTIVES: { value: TrainingObjective; label: string }[] = [
-  { value: 'speed', label: 'Mejorar velocidad pura' },
-  { value: 'energy_management', label: 'Optimizar gestión energética' },
-  { value: 'pilot_changes', label: 'Practicar cambios de piloto' },
-  { value: 'conditions', label: 'Adaptación a condiciones climáticas' },
-  { value: 'technical_setup', label: 'Pruebas técnicas / setup' },
-  { value: 'other', label: 'Otro' },
+// ─── Objectives config ────────────────────────────────────────────────────────
+
+const OBJECTIVES: { value: TrainingObjective; label: string; color: string }[] = [
+  { value: 'speed',              label: 'Mejorar velocidad pura',           color: '#ef4444' },
+  { value: 'energy_management',  label: 'Optimizar gestión energética',      color: '#22c55e' },
+  { value: 'pilot_changes',      label: 'Practicar cambios de piloto',        color: '#3b82f6' },
+  { value: 'technical_setup',    label: 'Pruebas técnicas / setup',           color: '#a855f7' },
+  { value: 'conditions',         label: 'Adaptación a condiciones climáticas',color: '#eab308' },
+  { value: 'junior_development', label: 'Desarrollo de pilotos jóvenes',      color: '#f97316' },
+  { value: 'other',              label: 'Otro',                               color: '#6b7280' },
 ]
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface FormValues {
+  date: string
+  startTime: string
+  endTime: string
+  locationId: string
+  vehicleId: string
+  pilotIds: string[]
+  objectives: TrainingObjective[]
+  objectivesOther: string
+  objectiveImportances: Record<string, number>
+  notes: string
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function timeToMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(':').map(Number)
+  return (h ?? 0) * 60 + (m ?? 0)
+}
 
 export default function NewSession() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [saveError, setSaveError] = useState<string | null>(null)
+  // Step 2: after session is created, show the schedule builder
+  const [createdSessionId, setCreatedSessionId] = useState<string | null>(null)
 
   const locations = useLiveQuery(() => db.trainingLocations.toArray(), [])
-  const vehicles = useLiveQuery(() => db.vehicles.toArray(), [])
+  const vehicles  = useLiveQuery(() => db.vehicles.toArray(), [])
 
   const { data: pilots = [] } = useQuery({
     queryKey: ['pilots'],
     queryFn: pilotsApi.getAll,
   })
 
-  const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm({
+  const { control, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormValues>({
     defaultValues: {
       date: new Date().toISOString().split('T')[0],
+      startTime: '09:30',
+      endTime: '16:30',
       locationId: '',
       vehicleId: '',
-      pilotIds: [] as string[],
-      durationMinutes: 60,
-      objectives: [] as TrainingObjective[],
+      pilotIds: [],
+      objectives: [],
       objectivesOther: '',
+      objectiveImportances: {},
       notes: '',
     },
   })
 
-  const selectedLocation = watch('locationId')
-  const selectedVehicle = watch('vehicleId')
+  const selectedLocation   = watch('locationId')
+  const selectedVehicle    = watch('vehicleId')
+  const selectedObjectives = watch('objectives')
+  const importances        = watch('objectiveImportances')
+  const startTime          = watch('startTime')
+  const endTime            = watch('endTime')
+
+  // Auto-fill times when Karting de Rivas is selected
+  const handleLocationChange = (locationId: string, onChange: (v: string) => void) => {
+    onChange(locationId)
+    const loc = locations?.find(l => l.id === locationId)
+    if (loc?.scheduleStart) setValue('startTime', loc.scheduleStart)
+    if (loc?.scheduleEnd)   setValue('endTime',   loc.scheduleEnd)
+  }
+
+  // Computed duration
+  const durationMinutes = Math.max(0, timeToMinutes(endTime) - timeToMinutes(startTime))
 
   // Filter vehicles based on location
   const availableVehicles = vehicles?.filter(v => {
@@ -63,7 +108,7 @@ export default function NewSession() {
     mutationFn: trainingApi.createSession,
     onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ['training-sessions'] })
-      navigate(`/training/${session.id}`)
+      setCreatedSessionId(session.id)
     },
     onError: (error: any) => {
       setSaveError(`Error al guardar. Comprueba que el servidor está disponible.${error?.message ? ` (${error.message})` : ''}`)
@@ -71,9 +116,49 @@ export default function NewSession() {
   })
 
   const handleObjectiveToggle = (value: TrainingObjective, current: TrainingObjective[]) => {
-    return current.includes(value)
+    const next = current.includes(value)
       ? current.filter(o => o !== value)
       : [...current, value]
+    // Set default importance 5 if newly added
+    if (!current.includes(value)) {
+      const curr = importances ?? {}
+      if (!(value in curr)) {
+        setValue('objectiveImportances', { ...curr, [value]: 5 })
+      }
+    }
+    return next
+  }
+
+  const onSubmit = (data: FormValues) => {
+    setSaveError(null)
+    // Serialize importances + other into notes
+    const importancesData = selectedObjectives.reduce((acc, obj) => {
+      acc[obj] = data.objectiveImportances?.[obj] ?? 5
+      return acc
+    }, {} as Record<string, number>)
+
+    const notesData: any = { importances: importancesData }
+    if (data.notes?.trim()) notesData.userNotes = data.notes.trim()
+
+    mutation.mutate({
+      ...data,
+      durationMinutes,
+      notes: JSON.stringify(notesData),
+    } as any)
+  }
+
+  // ─── Step 2: show schedule builder ──────────────────────────────────────────
+  if (createdSessionId) {
+    return (
+      <TrainingScheduleBuilder
+        sessionId={createdSessionId}
+        startTime={startTime}
+        endTime={endTime}
+        objectives={selectedObjectives}
+        importances={importances ?? {}}
+        onDone={() => navigate(`/training/${createdSessionId}`)}
+      />
+    )
   }
 
   return (
@@ -85,57 +170,80 @@ export default function NewSession() {
         <h1 className="text-2xl font-bold text-white">Nueva sesión de entrenamiento</h1>
       </div>
 
-      <form onSubmit={handleSubmit(data => { setSaveError(null); mutation.mutate(data as any) })} className="space-y-6">
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+
+        {/* ─── Session info ─────────────────────────────────────────────────── */}
         <Card title="Información de la sesión">
-          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <CardContent className="space-y-4">
+            {/* Date */}
             <div>
               <label className="label">Fecha *</label>
               <Controller name="date" control={control} render={({ field }) => (
                 <input type="date" {...field} className="input-field" />
               )} />
             </div>
-            <div>
-              <label className="label">Duración (minutos) *</label>
-              <Controller name="durationMinutes" control={control} render={({ field }) => (
-                <input type="number" {...field} className="input-field" min={15} max={480}
-                  onChange={e => field.onChange(+e.target.value)} />
-              )} />
+
+            {/* Time range */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Hora inicio *</label>
+                <Controller name="startTime" control={control} render={({ field }) => (
+                  <input type="time" {...field} className="input-field" />
+                )} />
+              </div>
+              <div>
+                <label className="label">Hora fin *</label>
+                <Controller name="endTime" control={control} render={({ field }) => (
+                  <input type="time" {...field} className="input-field" />
+                )} />
+              </div>
             </div>
-            <div>
-              <label className="label">Localización *</label>
-              <Controller name="locationId" control={control} render={({ field }) => (
-                <select {...field} className="input-field">
-                  <option value="">Seleccionar...</option>
-                  {locations?.map(l => (
-                    <option key={l.id} value={l.id}>{l.name}</option>
-                  ))}
-                </select>
-              )} />
-              {selectedLocation === 'karting_rivas' && (
-                <p className="text-xs text-info mt-1">Horario: 9:30 - 16:30</p>
-              )}
-            </div>
-            <div>
-              <label className="label">Vehículo *</label>
-              <Controller name="vehicleId" control={control} render={({ field }) => (
-                <select {...field} className="input-field">
-                  <option value="">Seleccionar...</option>
-                  {availableVehicles?.map(v => (
-                    <option key={v.id} value={v.id}>{v.name}</option>
-                  ))}
-                </select>
-              )} />
-              {showRestrictionWarning && (
-                <p className="text-xs text-danger mt-1 flex items-center gap-1">
-                  <AlertTriangle className="w-3 h-3" />
-                  SMC 02 EVO no puede entrenar en Karting de Rivas
-                </p>
-              )}
+            {durationMinutes > 0 && (
+              <p className="text-xs text-smc-muted -mt-2">
+                Duración total: <span className="text-white font-semibold">{durationMinutes} min</span>
+                {' '}({Math.floor(durationMinutes / 60)}h {durationMinutes % 60}min)
+              </p>
+            )}
+
+            {/* Location + Vehicle */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="label">Localización *</label>
+                <Controller name="locationId" control={control} render={({ field }) => (
+                  <select
+                    value={field.value}
+                    onChange={e => handleLocationChange(e.target.value, field.onChange)}
+                    className="input-field"
+                  >
+                    <option value="">Seleccionar...</option>
+                    {locations?.map(l => (
+                      <option key={l.id} value={l.id}>{l.name}</option>
+                    ))}
+                  </select>
+                )} />
+              </div>
+              <div>
+                <label className="label">Vehículo *</label>
+                <Controller name="vehicleId" control={control} render={({ field }) => (
+                  <select {...field} className="input-field">
+                    <option value="">Seleccionar...</option>
+                    {availableVehicles?.map(v => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                )} />
+                {showRestrictionWarning && (
+                  <p className="text-xs text-danger mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    SMC 02 EVO no puede entrenar en Karting de Rivas
+                  </p>
+                )}
+              </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Pilots */}
+        {/* ─── Pilots ───────────────────────────────────────────────────────── */}
         <Card title="Pilotos participantes">
           <CardContent>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -173,36 +281,92 @@ export default function NewSession() {
           </CardContent>
         </Card>
 
-        {/* Objectives */}
+        {/* ─── Objectives + importances ─────────────────────────────────────── */}
         <Card title="Objetivos de la sesión">
           <CardContent>
             <Controller
               name="objectives"
               control={control}
               render={({ field }) => (
-                <div className="space-y-2">
-                  {OBJECTIVES.map(obj => (
-                    <label key={obj.value} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                      field.value.includes(obj.value)
-                        ? 'border-primary bg-primary/10'
-                        : 'border-smc-border hover:border-primary/30'
-                    }`}>
-                      <input
-                        type="checkbox"
-                        checked={field.value.includes(obj.value)}
-                        onChange={() => field.onChange(handleObjectiveToggle(obj.value, field.value))}
-                        className="w-4 h-4 accent-primary"
-                      />
-                      <span className="text-sm text-smc-text">{obj.label}</span>
-                    </label>
-                  ))}
+                <div className="space-y-3">
+                  {OBJECTIVES.map(obj => {
+                    const isSelected = field.value.includes(obj.value)
+                    const importance = importances?.[obj.value] ?? 5
+                    return (
+                      <div key={obj.value}>
+                        <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                          isSelected
+                            ? 'border-primary bg-primary/10'
+                            : 'border-smc-border hover:border-primary/30'
+                        }`}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => field.onChange(handleObjectiveToggle(obj.value, field.value))}
+                            className="w-4 h-4 accent-primary"
+                          />
+                          {/* Color dot */}
+                          <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: obj.color }} />
+                          <span className="text-sm text-smc-text flex-1">{obj.label}</span>
+                          {isSelected && (
+                            <span className="text-xs text-smc-muted">Importancia: <span className="text-white font-semibold">{importance}</span></span>
+                          )}
+                        </label>
+
+                        {/* Importance slider — shown inline when selected */}
+                        {isSelected && (
+                          <div className="mx-3 mt-1 mb-1">
+                            <Controller
+                              name={`objectiveImportances.${obj.value}` as any}
+                              control={control}
+                              defaultValue={5}
+                              render={({ field: impField }) => (
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-smc-muted w-4">1</span>
+                                  <input
+                                    type="range"
+                                    min={1}
+                                    max={10}
+                                    step={1}
+                                    value={impField.value ?? 5}
+                                    onChange={e => impField.onChange(+e.target.value)}
+                                    className="flex-1 accent-primary h-1.5"
+                                    style={{ accentColor: obj.color }}
+                                  />
+                                  <span className="text-xs text-smc-muted w-4 text-right">10</span>
+                                </div>
+                              )}
+                            />
+                          </div>
+                        )}
+
+                        {/* Textarea for "other" objective */}
+                        {isSelected && obj.value === 'other' && (
+                          <div className="mx-3 mt-2">
+                            <Controller
+                              name="objectivesOther"
+                              control={control}
+                              render={({ field: otherField }) => (
+                                <textarea
+                                  {...otherField}
+                                  className="input-field resize-none text-sm"
+                                  rows={2}
+                                  placeholder="Describe el objetivo específico..."
+                                />
+                              )}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             />
           </CardContent>
         </Card>
 
-        {/* Notes */}
+        {/* ─── Notes ────────────────────────────────────────────────────────── */}
         <Card title="Notas">
           <CardContent>
             <Controller name="notes" control={control} render={({ field }) => (
@@ -222,11 +386,15 @@ export default function NewSession() {
           <Link to="/training" className="btn-secondary">Cancelar</Link>
           <button
             type="submit"
-            disabled={mutation.isPending || showRestrictionWarning}
+            disabled={mutation.isPending || showRestrictionWarning || durationMinutes <= 0}
             className="btn-primary flex items-center gap-2"
           >
-            <Save className="w-4 h-4" />
-            {mutation.isPending ? 'Creando...' : 'Crear sesión'}
+            {mutation.isPending ? 'Creando...' : (
+              <>
+                Crear sesión
+                {selectedObjectives.length > 0 && <span className="text-xs opacity-75">→ generar horario</span>}
+              </>
+            )}
           </button>
         </div>
       </form>

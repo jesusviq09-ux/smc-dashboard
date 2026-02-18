@@ -81,6 +81,7 @@ export type TrainingObjective =
   | 'pilot_changes'
   | 'conditions'
   | 'technical_setup'
+  | 'junior_development'
   | 'other'
 
 export interface TrainingLocation {
