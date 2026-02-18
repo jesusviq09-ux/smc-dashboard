@@ -65,14 +65,20 @@ export default function NewRace() {
           <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
               <label className="label">Nombre del evento *</label>
-              <Controller name="name" control={control} render={({ field }) => (
-                <input {...field} className="input-field" placeholder="Carrera Regional – Circuito Jarama" />
+              <Controller name="name" control={control} rules={{ required: 'El nombre es obligatorio' }} render={({ field, fieldState }) => (
+                <>
+                  <input {...field} className={`input-field ${fieldState.error ? 'border-danger' : ''}`} placeholder="Carrera Regional – Circuito Jarama" />
+                  {fieldState.error && <p className="text-xs text-danger mt-1">{fieldState.error.message}</p>}
+                </>
               )} />
             </div>
             <div>
               <label className="label">Fecha y hora *</label>
-              <Controller name="date" control={control} render={({ field }) => (
-                <input type="datetime-local" {...field} className="input-field" />
+              <Controller name="date" control={control} rules={{ required: 'La fecha y hora son obligatorias' }} render={({ field, fieldState }) => (
+                <>
+                  <input type="datetime-local" {...field} className={`input-field ${fieldState.error ? 'border-danger' : ''}`} />
+                  {fieldState.error && <p className="text-xs text-danger mt-1">{fieldState.error.message}</p>}
+                </>
               )} />
             </div>
             <div>

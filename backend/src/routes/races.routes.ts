@@ -38,6 +38,9 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   try {
     const { name, circuitId, date, categories, weatherConditions, circuitNotes, status } = req.body
+    if (!name || !date) {
+      return res.status(400).json({ error: 'Los campos nombre y fecha son obligatorios' })
+    }
     const event = await RaceEvent.create({
       name,
       circuitId: circuitId || null,
