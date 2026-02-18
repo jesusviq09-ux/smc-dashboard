@@ -34,7 +34,9 @@ export default function NewRace() {
   const mutation = useMutation({
     mutationFn: (data: any) => raceApi.createEvent({
       ...data,
-      circuitId: data.circuitId || undefined,
+        circuitId: data.circuitId || null,
+      weatherConditions: data.weatherConditions || null,
+      circuitNotes: data.circuitNotes || null,
       status: 'planned',
     }),
     onSuccess: (event) => {
