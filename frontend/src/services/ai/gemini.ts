@@ -11,13 +11,13 @@ export interface AnalysisPayload {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Uses OpenRouter (https://openrouter.ai) — free tier, no billing required.
-// Model: meta-llama/llama-3.1-8b-instruct:free
-// Limits (free): 20 req/min, 200 req/day — no credit card needed.
+// Model: google/gemma-3n-e4b-it:free
+// Limits (free): $0/M tokens, no credit card needed.
 // Get a free key at: https://openrouter.ai/keys
 
 const AI_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL = 'google/gemini-2.0-flash-exp:free'
+const MODEL = 'google/gemma-3n-e4b-it:free'
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ export function isGeminiAvailable(): boolean {
 }
 
 /**
- * Sends the race strategy to OpenRouter (Llama 3.1 8B free) and returns
+ * Sends the race strategy to OpenRouter (Gemma 3n free) and returns
  * a tactical analysis in Spanish (3-4 sentences).
  *
  * Throws on network error or API error — caller should handle.

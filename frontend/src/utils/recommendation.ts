@@ -283,12 +283,22 @@ function selectPilotsPerStint(
   // Build the available pool for a given stint slot, applying both constraints:
   //   (a) Not locked in this slot by another car (cross-car simultaneity)
   //   (b) Within 45-min cap for this car (intra-car time limit)
-  // Falls back progressively if no ideal candidate exists.
+  // Priority: always prefer pilots who haven't driven in this car yet ("fresh"),
+  // then fall back progressively if no ideal candidate exists.
   const poolFor = (stintNumber: number, stintDuration: number, subset?: ScoredPilot[]): ScoredPilot[] => {
     const src = subset ?? pilots
     const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
 
-    // Tier 1: not locked by other car AND within 45-min cap
+    // Tier 0: fresh (never used in this car) + not locked cross-car + within cap
+    // This ensures all available pilots get used before anyone repeats
+    const tier0 = src.filter(p =>
+      !minutesPerPilot.has(p.id) &&
+      !lockedSlot.has(p.id) &&
+      withinCap(p, stintDuration)
+    )
+    if (tier0.length > 0) return tier0
+
+    // Tier 1: not locked by other car AND within 45-min cap (may have done a stint already)
     const tier1 = src.filter(p => !lockedSlot.has(p.id) && withinCap(p, stintDuration))
     if (tier1.length > 0) return tier1
 
