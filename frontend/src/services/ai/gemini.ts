@@ -17,7 +17,7 @@ export interface AnalysisPayload {
 
 const AI_API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY as string | undefined
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL = 'meta-llama/llama-3.1-8b-instruct:free'
+const MODEL = 'google/gemini-2.0-flash-exp:free'
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 

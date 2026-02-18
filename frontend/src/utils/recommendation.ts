@@ -198,6 +198,8 @@ function calcRoleScore(
 
 // ─── Stint builder ────────────────────────────────────────────────────────────
 
+const MAX_MINUTES_PER_PILOT_PER_CAR = 45
+
 interface BuildStintsInput {
   vehicle: Vehicle
   rolePilots: ScoredPilot[]
@@ -219,11 +221,12 @@ function buildStints({
   circuit,
   warnings,
 }: BuildStintsInput) {
-  // Select one pilot per stint, respecting the simultaneity constraint.
-  // stintSlotOccupied is shared across all vehicles and updated as we assign.
+  // Select one pilot per stint, respecting both the simultaneity constraint
+  // (cross-car) and the 45-min cap (intra-car).
   const orderedPilots = selectPilotsPerStint(
     rolePilots,
     numStints,
+    stintDurations,
     priorityMode,
     stintSlotOccupied,
     warnings,
@@ -237,8 +240,7 @@ function buildStints({
     const energyFactor = objective === 'AGGRESSIVE' ? 1.2 : objective === 'CONSERVATIVE' ? 0.75 : 1.0
     const estimatedEnergyWh = ENERGY_PER_STINT_WH * energyFactor * (durationMinutes / 20)
 
-    // Lock this pilot into this slot so no other car can use them at the same time
-    stintSlotOccupied[stintNumber].add(pilot.id)
+    // Note: stintSlotOccupied already updated inside selectPilotsPerStint → pick()
 
     return {
       stintNumber,
@@ -262,78 +264,83 @@ function buildStints({
 function selectPilotsPerStint(
   pilots: ScoredPilot[],
   numStints: number,
+  stintDurations: number[],
   priorityMode: RacePriorityMode,
   stintSlotOccupied: Record<number, Set<string>>,
   warnings: string[],
   vehicleName: string
 ): ScoredPilot[] {
-  // pickedInThisCar: pilots already assigned to a previous stint in THIS car.
-  // Combined with stintSlotOccupied (other cars), gives full exclusion.
-  const pickedInThisCar = new Set<string>()
+  // minutesPerPilot: tracks total minutes accumulated per pilot in THIS car.
+  // A pilot cannot exceed MAX_MINUTES_PER_PILOT_PER_CAR (45 min) in a single car.
+  const minutesPerPilot = new Map<string, number>()
 
-  // Best pilot for a slot that is:
-  //   (a) not locked by another car at this stintNumber, AND
-  //   (b) not already driving a different stint in this same car
-  // If no pilot satisfies both, relax (b) — pilots can repeat if there's no other option.
-  const bestFor = (stintNumber: number, prefer?: (p: ScoredPilot) => boolean): ScoredPilot => {
-    const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
-
-    // Ideal: not locked by other car AND not already in this car
-    const ideal = pilots.filter(p => !lockedSlot.has(p.id) && !pickedInThisCar.has(p.id))
-    // Acceptable: not locked by other car (may repeat in this car)
-    const acceptable = pilots.filter(p => !lockedSlot.has(p.id))
-    // Last resort: anyone (same pilot in same slot of two cars — only if truly unavoidable)
-    const pool = ideal.length > 0 ? ideal : acceptable.length > 0 ? acceptable : pilots
-
-    if (prefer) {
-      const preferred = pool.filter(prefer)
-      if (preferred.length > 0) return preferred[0]
-    }
-    return pool[0]
+  // Helper: is this pilot still within the 45-min cap for this car?
+  const withinCap = (pilot: ScoredPilot, stintDuration: number): boolean => {
+    const accumulated = minutesPerPilot.get(pilot.id) ?? 0
+    return accumulated + stintDuration <= MAX_MINUTES_PER_PILOT_PER_CAR
   }
 
-  const pick = (pilot: ScoredPilot) => {
-    result.push(pilot)
-    pickedInThisCar.add(pilot.id)
+  // Build the available pool for a given stint slot, applying both constraints:
+  //   (a) Not locked in this slot by another car (cross-car simultaneity)
+  //   (b) Within 45-min cap for this car (intra-car time limit)
+  // Falls back progressively if no ideal candidate exists.
+  const poolFor = (stintNumber: number, stintDuration: number, subset?: ScoredPilot[]): ScoredPilot[] => {
+    const src = subset ?? pilots
+    const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
+
+    // Tier 1: not locked by other car AND within 45-min cap
+    const tier1 = src.filter(p => !lockedSlot.has(p.id) && withinCap(p, stintDuration))
+    if (tier1.length > 0) return tier1
+
+    // Tier 2: within 45-min cap but may be locked in slot by other car (last resort cross-car)
+    const tier2 = src.filter(p => withinCap(p, stintDuration))
+    if (tier2.length > 0) return tier2
+
+    // Tier 3: not locked by other car but exceeds cap (warn later)
+    const tier3 = src.filter(p => !lockedSlot.has(p.id))
+    if (tier3.length > 0) return tier3
+
+    // Tier 4: anyone — truly unavoidable repetition
+    return src.length > 0 ? src : pilots
   }
 
   const result: ScoredPilot[] = []
 
+  const pick = (pilot: ScoredPilot, stintDuration: number, stintNumber: number) => {
+    result.push(pilot)
+    minutesPerPilot.set(pilot.id, (minutesPerPilot.get(pilot.id) ?? 0) + stintDuration)
+    // Lock slot for this car as well (shared object, updated in buildStints too)
+    stintSlotOccupied[stintNumber]?.add(pilot.id)
+  }
+
   if (priorityMode === 'WIN') {
-    // Slot order: opener (2nd best) → middle (best available) → closer (best)
+    // Opener (2nd best) → middle (best) → closer (best)
     for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
       const stintNumber = stintIdx + 1
-      const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
-      const notLockedByOtherCar = pilots.filter(p => !lockedSlot.has(p.id))
-      const idealPool = notLockedByOtherCar.filter(p => !pickedInThisCar.has(p.id))
-      const pool = idealPool.length > 0 ? idealPool : notLockedByOtherCar.length > 0 ? notLockedByOtherCar : pilots
+      const dur = stintDurations[stintIdx] ?? stintDurations[stintDurations.length - 1]
+      const pool = poolFor(stintNumber, dur)
 
       if (stintNumber === numStints) {
-        // Best pilot closes
-        pick(pool[0])
+        pick(pool[0], dur, stintNumber)
       } else if (stintNumber === 1) {
-        // Second best opens (prefer not the top of pool to save best for close)
+        // Save best for close — pick second if available
         const opener = pool.length > 1 ? pool[1] : pool[0]
-        pick(opener)
+        pick(opener, dur, stintNumber)
       } else {
-        // Middle: best available
-        pick(pool[0])
+        pick(pool[0], dur, stintNumber)
       }
     }
 
   } else if (priorityMode === 'FINISH') {
-    // Most consistent & energy-efficient pilots, each stint a different pilot if possible
     const sorted = [...pilots].sort((a, b) =>
       (b.ratings.consistency + b.ratings.energyManagement) -
       (a.ratings.consistency + a.ratings.energyManagement)
     )
     for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
       const stintNumber = stintIdx + 1
-      const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
-      const ideal = sorted.filter(p => !lockedSlot.has(p.id) && !pickedInThisCar.has(p.id))
-      const acceptable = sorted.filter(p => !lockedSlot.has(p.id))
-      const chosen = ideal[0] ?? acceptable[0] ?? sorted[stintIdx % sorted.length]
-      pick(chosen)
+      const dur = stintDurations[stintIdx] ?? stintDurations[stintDurations.length - 1]
+      const pool = poolFor(stintNumber, dur, sorted)
+      pick(pool[0], dur, stintNumber)
     }
 
   } else if (priorityMode === 'DEVELOP_JUNIORS') {
@@ -342,36 +349,47 @@ function selectPilotsPerStint(
 
     if (juniors.length === 0) {
       warnings.push(`No hay pilotos junior para "${vehicleName}". Usando modo FINISH.`)
-      return selectPilotsPerStint(pilots, numStints, 'FINISH', stintSlotOccupied, warnings, vehicleName)
+      return selectPilotsPerStint(pilots, numStints, stintDurations, 'FINISH', stintSlotOccupied, warnings, vehicleName)
     }
 
     for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
       const stintNumber = stintIdx + 1
-      const lockedSlot = stintSlotOccupied[stintNumber] ?? new Set()
+      const dur = stintDurations[stintIdx] ?? stintDurations[stintDurations.length - 1]
 
       if (stintNumber === 1 || stintNumber === numStints) {
-        // Seniors bookend
-        const idealSeniors = seniors.filter(p => !lockedSlot.has(p.id) && !pickedInThisCar.has(p.id))
-        const acceptableSeniors = seniors.filter(p => !lockedSlot.has(p.id))
-        pick(idealSeniors[0] ?? acceptableSeniors[0] ?? bestFor(stintNumber))
+        const pool = poolFor(stintNumber, dur, seniors.length > 0 ? seniors : pilots)
+        pick(pool[0], dur, stintNumber)
       } else {
-        // Junior in middle
-        const idealJuniors = juniors.filter(p => !lockedSlot.has(p.id) && !pickedInThisCar.has(p.id))
-        const acceptableJuniors = juniors.filter(p => !lockedSlot.has(p.id))
-        pick(idealJuniors[0] ?? acceptableJuniors[0] ?? bestFor(stintNumber))
+        const pool = poolFor(stintNumber, dur, juniors.length > 0 ? juniors : pilots)
+        pick(pool[0], dur, stintNumber)
       }
     }
 
   } else {
-    // Fallback
     for (let stintIdx = 0; stintIdx < numStints; stintIdx++) {
-      pick(bestFor(stintIdx + 1))
+      const stintNumber = stintIdx + 1
+      const dur = stintDurations[stintIdx] ?? stintDurations[stintDurations.length - 1]
+      const pool = poolFor(stintNumber, dur)
+      pick(pool[0], dur, stintNumber)
     }
   }
 
-  // Safety: fill remaining slots if needed
+  // Safety fill
   while (result.length < numStints) {
-    pick(bestFor(result.length + 1))
+    const stintNumber = result.length + 1
+    const dur = stintDurations[result.length] ?? stintDurations[stintDurations.length - 1]
+    const pool = poolFor(stintNumber, dur)
+    pick(pool[0], dur, stintNumber)
+  }
+
+  // Warn if any pilot ended up exceeding the cap (means we had no better option)
+  for (const [pilotId, mins] of minutesPerPilot.entries()) {
+    if (mins > MAX_MINUTES_PER_PILOT_PER_CAR) {
+      const pilot = pilots.find(p => p.id === pilotId)
+      if (pilot) {
+        warnings.push(`⚠️ Pocos pilotos: ${pilot.fullName} acumula ${mins} min en ${vehicleName} (máx. ${MAX_MINUTES_PER_PILOT_PER_CAR} min)`)
+      }
+    }
   }
 
   return result.slice(0, numStints)
