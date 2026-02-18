@@ -37,10 +37,19 @@ router.get('/:id', async (req: Request, res: Response) => {
 // POST /races
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const event = await RaceEvent.create(req.body)
+    const { name, circuitId, date, categories, weatherConditions, circuitNotes, status } = req.body
+    const event = await RaceEvent.create({
+      name,
+      circuitId: circuitId || null,
+      date,
+      categories: Array.isArray(categories) ? categories : [],
+      weatherConditions: weatherConditions || null,
+      circuitNotes: circuitNotes || null,
+      status: status || 'planned',
+    })
     res.status(201).json(event)
   } catch (err: any) {
-    console.error(err)
+    console.error('POST /races error:', err.message, (err as any).original?.message, JSON.stringify(req.body))
     res.status(500).json({ error: err.message || 'Error interno' })
   }
 })

@@ -495,5 +495,15 @@ PasswordResetToken.init({
 
 export async function syncModels() {
   await sequelize.sync({ alter: true })
+  // Forzar VARCHAR en circuit_id por si alter:true no pudo cambiar el tipo
+  // desde UUID. USING ::text convierte valores existentes sin error.
+  try {
+    await sequelize.query(
+      `ALTER TABLE race_events ALTER COLUMN "circuit_id" TYPE VARCHAR(255) USING "circuit_id"::text`
+    )
+    console.log('race_events.circuit_id migrated to VARCHAR')
+  } catch (_e) {
+    // Ya era VARCHAR o no existe — ambos casos son correctos
+  }
   console.log('All models synced')
 }
