@@ -108,20 +108,24 @@ function parseAIResponse(raw: string, payload: AnalysisPayload): AIStrategyOutpu
       const analysis: string = parsed.analysis ?? raw
       const suggested = parsed.suggestedStrategy
 
-      // Validate suggested strategy: all pilotIds must exist in payload.pilots
+      // Validate suggested strategy: filter out invalid IDs instead of rejecting entirely
       if (suggested?.vehicleAssignments?.length) {
         const validPilotIds = new Set(payload.pilots.map(p => p.id))
         const validVehicleIds = new Set(
           payload.recommendation.vehicleAssignments.map(a => a.vehicle.id)
         )
-        const allValid = suggested.vehicleAssignments.every((va: any) =>
-          validVehicleIds.has(va.vehicleId) &&
-          Array.isArray(va.stints) &&
-          va.stints.every((s: any) => validPilotIds.has(s.pilotId))
-        )
-        if (allValid) {
-          return { analysis, suggestedStrategy: suggested }
+        const filteredAssignments = suggested.vehicleAssignments
+          .filter((va: any) => validVehicleIds.has(va.vehicleId))
+          .map((va: any) => ({
+            ...va,
+            stints: (va.stints ?? []).filter((s: any) => validPilotIds.has(s.pilotId)),
+          }))
+          .filter((va: any) => va.stints.length > 0)
+
+        if (filteredAssignments.length > 0) {
+          return { analysis, suggestedStrategy: { vehicleAssignments: filteredAssignments } }
         }
+        console.warn('[AI] suggestedStrategy descartada — IDs no coinciden:', JSON.stringify(suggested).slice(0, 400))
       }
 
       // JSON parsed but no valid strategy → return analysis only
