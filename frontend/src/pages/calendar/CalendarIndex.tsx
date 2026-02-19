@@ -1,44 +1,96 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Plus, X, Pencil, Trash2 } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, X, Trash2, Download, Settings2 } from 'lucide-react'
 import { calendarApi, CalendarEventItem } from '@/services/api/calendar.api'
 import { raceApi } from '@/services/api/race.api'
 import { trainingApi } from '@/services/api/training.api'
 import { maintenanceApi } from '@/services/api/maintenance.api'
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth, isSameDay, parseISO, isToday, startOfDay } from 'date-fns'
 import { es } from 'date-fns/locale'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type UnifiedEvent = {
   id: string
   title: string
   date: string
   endDate?: string
-  type: 'race' | 'training' | 'maintenance' | 'custom'
+  type: string   // 'race' | 'training' | 'maintenance' | 'custom' | category.id
 }
 
-const TYPE_STYLES = {
-  race: 'bg-primary/20 text-primary',
-  training: 'bg-success/20 text-success',
+interface CalendarCategory {
+  id: string
+  name: string
+  emoji: string
+  color: string
+  isDefault?: boolean
+}
+
+// ─── Default categories ───────────────────────────────────────────────────────
+
+const DEFAULT_CATEGORIES: CalendarCategory[] = [
+  { id: 'event',    name: 'Evento',        emoji: '📅', color: '#3b82f6', isDefault: true },
+  { id: 'reminder', name: 'Recordatorio',  emoji: '🔔', color: '#f59e0b', isDefault: true },
+  { id: 'meeting',  name: 'Reunión',       emoji: '🤝', color: '#a855f7', isDefault: true },
+]
+
+const SYSTEM_TYPE_STYLES: Record<string, string> = {
+  race:        'bg-primary/20 text-primary',
+  training:    'bg-success/20 text-success',
   maintenance: 'bg-warning/20 text-warning',
-  custom: 'bg-blue-500/20 text-blue-400',
 }
-
-const TYPE_LABELS = {
-  race: '🏁',
-  training: '🏋️',
+const SYSTEM_TYPE_LABELS: Record<string, string> = {
+  race:        '🏁',
+  training:    '🏋️',
   maintenance: '🔧',
-  custom: '📅',
+}
+const SYSTEM_TYPE_NAMES: Record<string, string> = {
+  race:        'Carreras',
+  training:    'Entrenamientos',
+  maintenance: 'Mantenimiento',
 }
 
-const EMPTY_FORM = { title: '', date: '', endDate: '', type: 'event' as CalendarEventItem['type'], description: '', color: '' }
+const PALETTE = ['#3b82f6', '#22c55e', '#ef4444', '#f59e0b', '#a855f7', '#ec4899', '#06b6d4', '#6b7280']
+
+const LS_KEY = 'smc_calendar_categories'
+
+function loadCategories(): CalendarCategory[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (raw) return JSON.parse(raw) as CalendarCategory[]
+  } catch { /* ignore */ }
+  return DEFAULT_CATEGORIES
+}
+
+function saveCategories(cats: CalendarCategory[]) {
+  localStorage.setItem(LS_KEY, JSON.stringify(cats))
+}
+
+const EMPTY_FORM = {
+  title: '', date: '', endDate: '', type: 'event',
+  description: '', color: '',
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function CalendarIndex() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
-  const [selectedDay, setSelectedDay] = useState<Date | null>(null)
   const [editingEvent, setEditingEvent] = useState<CalendarEventItem | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+
+  // Overflow day modal
+  const [overflowDay, setOverflowDay] = useState<Date | null>(null)
+
+  // Categories state (localStorage)
+  const [categories, setCategories] = useState<CalendarCategory[]>(loadCategories)
+  const [showCatManager, setShowCatManager] = useState(false)
+  const [newCatForm, setNewCatForm] = useState({ name: '', emoji: '📌', color: PALETTE[0] })
+  const [editingCat, setEditingCat] = useState<CalendarCategory | null>(null)
+  const [addingCat, setAddingCat] = useState(false)
 
   const qc = useQueryClient()
 
@@ -62,14 +114,39 @@ export default function CalendarIndex() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['calendar-events'] }); setDeleteConfirmId(null) },
   })
 
+  // ─── Category helpers ─────────────────────────────────────────────────────
+
+  const persistCategories = (cats: CalendarCategory[]) => {
+    setCategories(cats)
+    saveCategories(cats)
+  }
+
+  const getCategoryById = (typeId: string): CalendarCategory | undefined =>
+    categories.find(c => c.id === typeId)
+
+  const getEventLabel = (typeId: string): string => {
+    if (SYSTEM_TYPE_LABELS[typeId]) return SYSTEM_TYPE_LABELS[typeId]
+    return getCategoryById(typeId)?.emoji ?? '📅'
+  }
+
+  const getEventBgStyle = (typeId: string): React.CSSProperties => {
+    if (SYSTEM_TYPE_STYLES[typeId]) return {}
+    const cat = getCategoryById(typeId)
+    if (cat) return { backgroundColor: cat.color + '25', color: cat.color }
+    return {}
+  }
+
+  // ─── Unified events ───────────────────────────────────────────────────────
+
   const allEvents: UnifiedEvent[] = useMemo(() => [
-    ...races.map(r => ({ id: r.id, title: r.name, date: r.date, type: 'race' as const })),
-    ...trainings.map(t => ({ id: t.id, title: `Entrenamiento`, date: t.date, type: 'training' as const })),
-    ...(maintenanceRecords as any[]).map(m => ({ id: m.id, title: m.description || 'Mantenimiento', date: m.date, type: 'maintenance' as const })),
-    ...customEvents.map(e => ({ id: e.id, title: e.title, date: e.date, endDate: e.endDate, type: 'custom' as const })),
+    ...races.map(r => ({ id: r.id, title: r.name, date: r.date.slice(0, 10), type: 'race' })),
+    ...trainings.map(t => ({ id: t.id, title: 'Entrenamiento', date: (t.date as string).slice(0, 10), type: 'training' })),
+    ...(maintenanceRecords as any[]).map(m => ({ id: m.id, title: m.description || 'Mantenimiento', date: (m.date as string).slice(0, 10), type: 'maintenance' })),
+    ...customEvents.map(e => ({ id: e.id, title: e.title, date: e.date, endDate: e.endDate, type: e.type })),
   ], [races, trainings, maintenanceRecords, customEvents])
 
-  // Build calendar grid
+  // ─── Calendar grid ────────────────────────────────────────────────────────
+
   const monthStart = startOfMonth(currentMonth)
   const monthEnd = endOfMonth(currentMonth)
   const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
@@ -84,14 +161,16 @@ export default function CalendarIndex() {
       const start = startOfDay(parseISO(e.date))
       if (!e.endDate) return isSameDay(start, day)
       const end = startOfDay(parseISO(e.endDate))
-      const d = startOfDay(day)
-      return d >= start && d <= end
+      const dd = startOfDay(day)
+      return dd >= start && dd <= end
     })
 
   const isEventStart = (ev: UnifiedEvent, day: Date) => isSameDay(parseISO(ev.date), day)
   const isEventEnd = (ev: UnifiedEvent, day: Date) =>
     ev.endDate ? isSameDay(parseISO(ev.endDate), day) : isSameDay(parseISO(ev.date), day)
   const isMultiDay = (ev: UnifiedEvent) => !!ev.endDate && ev.date !== ev.endDate
+
+  // ─── Modal helpers ────────────────────────────────────────────────────────
 
   const openCreateModal = (day: Date) => {
     setEditingEvent(null)
@@ -117,10 +196,10 @@ export default function CalendarIndex() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.title || !form.date) return
-    const payload = {
+    const payload: Omit<CalendarEventItem, 'id'> = {
       title: form.title,
       date: form.date,
-      type: form.type,
+      type: form.type as CalendarEventItem['type'],
       endDate: form.endDate || undefined,
       description: form.description || undefined,
       color: form.color || undefined,
@@ -132,7 +211,81 @@ export default function CalendarIndex() {
     }
   }
 
+  // ─── Category management ──────────────────────────────────────────────────
+
+  const handleAddCategory = () => {
+    if (!newCatForm.name.trim()) return
+    const cat: CalendarCategory = {
+      id: `cat_${Date.now()}`,
+      name: newCatForm.name.trim(),
+      emoji: newCatForm.emoji || '📌',
+      color: newCatForm.color,
+    }
+    persistCategories([...categories, cat])
+    setNewCatForm({ name: '', emoji: '📌', color: PALETTE[0] })
+    setAddingCat(false)
+    // Auto-select the new category in the event form
+    setForm(f => ({ ...f, type: cat.id }))
+  }
+
+  const handleUpdateCategory = () => {
+    if (!editingCat) return
+    persistCategories(categories.map(c => c.id === editingCat.id ? editingCat : c))
+    setEditingCat(null)
+  }
+
+  const handleDeleteCategory = (id: string) => {
+    persistCategories(categories.filter(c => c.id !== id))
+  }
+
+  // ─── PDF export ───────────────────────────────────────────────────────────
+
+  const exportCalendarPDF = () => {
+    const doc = new jsPDF()
+    const monthLabel = format(currentMonth, 'MMMM yyyy', { locale: es })
+    doc.setFontSize(18)
+    doc.setTextColor(0, 212, 255)
+    doc.text(`SMC Greenpower — Calendario · ${monthLabel}`, 14, 20)
+    doc.setFontSize(10)
+    doc.setTextColor(150)
+    doc.text(`Generado: ${new Date().toLocaleString('es-ES')}`, 14, 28)
+
+    const monthEvents = allEvents
+      .filter(e => isSameMonth(parseISO(e.date), currentMonth))
+      .sort((a, b) => a.date.localeCompare(b.date))
+
+    if (monthEvents.length === 0) {
+      doc.setFontSize(11)
+      doc.setTextColor(180)
+      doc.text('No hay eventos este mes.', 14, 40)
+    } else {
+      autoTable(doc, {
+        startY: 34,
+        head: [['Fecha', 'Tipo', 'Título']],
+        body: monthEvents.map(ev => {
+          const label = getEventLabel(ev.type)
+          const typeName = SYSTEM_TYPE_NAMES[ev.type]
+            ?? getCategoryById(ev.type)?.name
+            ?? 'Evento'
+          return [
+            format(parseISO(ev.date), "d MMM", { locale: es }),
+            `${label} ${typeName}`,
+            ev.title,
+          ]
+        }),
+        styles: { fontSize: 9, fillColor: [22, 27, 34], textColor: [200, 200, 200] },
+        headStyles: { fillColor: [0, 100, 130], textColor: [255, 255, 255] },
+        alternateRowStyles: { fillColor: [13, 17, 23] },
+        columnStyles: { 0: { cellWidth: 25 }, 1: { cellWidth: 50 } },
+      })
+    }
+
+    doc.save(`SMC-calendario-${format(currentMonth, 'yyyy-MM')}.pdf`)
+  }
+
   const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
+
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-4">
@@ -151,6 +304,12 @@ export default function CalendarIndex() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setCurrentMonth(new Date())} className="btn-secondary text-sm py-1.5">Hoy</button>
+          <button onClick={exportCalendarPDF} className="btn-secondary text-sm flex items-center gap-1 py-1.5" title="Exportar PDF del mes">
+            <Download className="w-4 h-4" /> PDF
+          </button>
+          <button onClick={() => setShowCatManager(true)} className="btn-secondary text-sm flex items-center gap-1 py-1.5" title="Gestionar categorías">
+            <Settings2 className="w-4 h-4" />
+          </button>
           <button onClick={() => openCreateModal(new Date())} className="btn-primary text-sm flex items-center gap-1 py-1.5">
             <Plus className="w-4 h-4" /> Evento
           </button>
@@ -158,10 +317,15 @@ export default function CalendarIndex() {
       </div>
 
       {/* Legend */}
-      <div className="flex flex-wrap gap-3 text-xs">
-        {(Object.entries(TYPE_LABELS) as [keyof typeof TYPE_LABELS, string][]).map(([type, icon]) => (
-          <span key={type} className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${TYPE_STYLES[type]}`}>
-            {icon} {type === 'race' ? 'Carreras' : type === 'training' ? 'Entrenamientos' : type === 'maintenance' ? 'Mantenimiento' : 'Eventos propios'}
+      <div className="flex flex-wrap gap-2 text-xs">
+        {(Object.entries(SYSTEM_TYPE_LABELS) as [string, string][]).map(([type, icon]) => (
+          <span key={type} className={`flex items-center gap-1 px-2 py-0.5 rounded-full ${SYSTEM_TYPE_STYLES[type]}`}>
+            {icon} {SYSTEM_TYPE_NAMES[type]}
+          </span>
+        ))}
+        {categories.map(cat => (
+          <span key={cat.id} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-white" style={{ backgroundColor: cat.color + '30', color: cat.color }}>
+            {cat.emoji} {cat.name}
           </span>
         ))}
       </div>
@@ -200,33 +364,36 @@ export default function CalendarIndex() {
                     const start = isEventStart(ev, day)
                     const end = isEventEnd(ev, day)
                     const middle = multi && !start && !end
-
-                    // Border radius: full for single-day, left only for start, none for middle, right only for end
                     const radius = !multi ? 'rounded' : start ? 'rounded-l rounded-r-none' : end ? 'rounded-r rounded-l-none' : 'rounded-none'
-                    // Padding: reduce side padding for multi-day continuation
                     const px = middle || (multi && end) ? 'px-0' : 'px-1'
-                    // Show title only on start (or single-day)
                     const showTitle = !multi || start
+                    const sysStyle = SYSTEM_TYPE_STYLES[ev.type]
 
                     return (
                       <div
                         key={ev.id}
                         onClick={e => {
                           e.stopPropagation()
-                          if (ev.type === 'custom') {
+                          if (ev.type !== 'race' && ev.type !== 'training' && ev.type !== 'maintenance') {
                             const full = customEvents.find(c => c.id === ev.id)
                             if (full) openEditModal(full)
                           }
                         }}
-                        className={`text-xs py-0.5 truncate ${radius} ${px} ${TYPE_STYLES[ev.type]} ${ev.type === 'custom' ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                        className={`text-xs py-0.5 truncate ${radius} ${px} ${sysStyle ?? ''} ${ev.type !== 'race' && ev.type !== 'training' && ev.type !== 'maintenance' ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                        style={!sysStyle ? getEventBgStyle(ev.type) : undefined}
                         title={ev.title}
                       >
-                        {showTitle ? <>{TYPE_LABELS[ev.type]} {ev.title}</> : <>&nbsp;</>}
+                        {showTitle ? <>{getEventLabel(ev.type)} {ev.title}</> : <>&nbsp;</>}
                       </div>
                     )
                   })}
                   {events.length > 3 && (
-                    <div className="text-xs text-smc-muted px-1">+{events.length - 3} más</div>
+                    <button
+                      onClick={e => { e.stopPropagation(); setOverflowDay(day) }}
+                      className="text-xs text-primary px-1 hover:underline w-full text-left"
+                    >
+                      +{events.length - 3} más
+                    </button>
                   )}
                 </div>
               </div>
@@ -260,13 +427,71 @@ export default function CalendarIndex() {
                   <input type="date" className="input-field" value={form.endDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} />
                 </div>
               </div>
+              {/* Category selector */}
               <div>
-                <label className="label">Tipo</label>
-                <select className="input-field" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value as CalendarEventItem['type'] }))}>
-                  <option value="event">Evento</option>
-                  <option value="reminder">Recordatorio</option>
-                  <option value="meeting">Reunión</option>
-                </select>
+                <label className="label">Categoría</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {categories.map(cat => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setForm(f => ({ ...f, type: cat.id }))}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs border transition-colors ${
+                        form.type === cat.id
+                          ? 'border-2 font-semibold'
+                          : 'border-smc-border text-smc-muted hover:border-smc-text/40'
+                      }`}
+                      style={form.type === cat.id ? { borderColor: cat.color, color: cat.color, backgroundColor: cat.color + '18' } : {}}
+                    >
+                      {cat.emoji} {cat.name}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => { setAddingCat(true); setShowCatManager(false) }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs border border-dashed border-smc-border text-smc-muted hover:border-primary/40 hover:text-primary transition-colors"
+                  >
+                    <Plus className="w-3 h-3" /> Nueva
+                  </button>
+                </div>
+                {/* Inline new-category form */}
+                {addingCat && (
+                  <div className="mt-2 p-3 bg-smc-darker rounded-lg border border-smc-border space-y-2">
+                    <p className="text-xs text-smc-muted font-semibold">Nueva categoría</p>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        maxLength={2}
+                        value={newCatForm.emoji}
+                        onChange={e => setNewCatForm(f => ({ ...f, emoji: e.target.value }))}
+                        placeholder="🏷"
+                        className="input-field w-12 text-center px-1"
+                      />
+                      <input
+                        type="text"
+                        value={newCatForm.name}
+                        onChange={e => setNewCatForm(f => ({ ...f, name: e.target.value }))}
+                        placeholder="Nombre..."
+                        className="input-field flex-1"
+                      />
+                    </div>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {PALETTE.map(c => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setNewCatForm(f => ({ ...f, color: c }))}
+                          className={`w-6 h-6 rounded-full border-2 transition-transform ${newCatForm.color === c ? 'scale-125 border-white' : 'border-transparent'}`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                    <div className="flex gap-2 justify-end">
+                      <button type="button" onClick={() => setAddingCat(false)} className="btn-secondary text-xs py-1">Cancelar</button>
+                      <button type="button" onClick={handleAddCategory} className="btn-primary text-xs py-1">Añadir</button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="label">Descripción</label>
@@ -286,6 +511,163 @@ export default function CalendarIndex() {
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Overflow day modal */}
+      {overflowDay && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card border border-smc-border rounded-xl p-5 w-full max-w-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-white capitalize">
+                {format(overflowDay, "EEEE d 'de' MMMM", { locale: es })}
+              </h3>
+              <button onClick={() => setOverflowDay(null)} className="text-smc-muted hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {getEventsForDay(overflowDay).map(ev => {
+                const sysStyle = SYSTEM_TYPE_STYLES[ev.type]
+                const isEditable = ev.type !== 'race' && ev.type !== 'training' && ev.type !== 'maintenance'
+                return (
+                  <div
+                    key={ev.id}
+                    onClick={() => {
+                      if (isEditable) {
+                        const full = customEvents.find(c => c.id === ev.id)
+                        if (full) { setOverflowDay(null); openEditModal(full) }
+                      }
+                    }}
+                    className={`text-xs px-2.5 py-2 rounded-lg flex items-center gap-2 ${sysStyle ?? ''} ${isEditable ? 'cursor-pointer hover:opacity-80' : 'cursor-default'}`}
+                    style={!sysStyle ? getEventBgStyle(ev.type) : undefined}
+                  >
+                    <span className="flex-shrink-0">{getEventLabel(ev.type)}</span>
+                    <span className="flex-1 font-medium truncate">{ev.title}</span>
+                    {isEditable && <span className="text-smc-muted/60 flex-shrink-0">Editar →</span>}
+                  </div>
+                )
+              })}
+            </div>
+            <button
+              onClick={() => { setOverflowDay(null); openCreateModal(overflowDay) }}
+              className="btn-primary w-full mt-3 text-sm py-1.5 flex items-center justify-center gap-1"
+            >
+              <Plus className="w-4 h-4" /> Nuevo evento este día
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Category manager modal */}
+      {showCatManager && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card border border-smc-border rounded-xl p-5 w-full max-w-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-white">Gestionar categorías</h3>
+              <button onClick={() => setShowCatManager(false)} className="text-smc-muted hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {categories.map(cat => (
+                <div key={cat.id} className="flex items-center gap-2 p-2 rounded-lg bg-smc-darker">
+                  {editingCat?.id === cat.id ? (
+                    <>
+                      <input
+                        type="text"
+                        maxLength={2}
+                        value={editingCat.emoji}
+                        onChange={e => setEditingCat(c => c ? { ...c, emoji: e.target.value } : c)}
+                        className="input-field w-10 text-center px-1 text-sm py-1"
+                      />
+                      <input
+                        type="text"
+                        value={editingCat.name}
+                        onChange={e => setEditingCat(c => c ? { ...c, name: e.target.value } : c)}
+                        className="input-field flex-1 text-sm py-1"
+                      />
+                      <div className="flex gap-1">
+                        {PALETTE.map(c => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setEditingCat(ec => ec ? { ...ec, color: c } : ec)}
+                            className={`w-4 h-4 rounded-full border ${editingCat.color === c ? 'border-white scale-110' : 'border-transparent'}`}
+                            style={{ backgroundColor: c }}
+                          />
+                        ))}
+                      </div>
+                      <button onClick={handleUpdateCategory} className="text-xs text-success hover:underline">✓</button>
+                      <button onClick={() => setEditingCat(null)} className="text-xs text-smc-muted hover:underline">✕</button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-base">{cat.emoji}</span>
+                      <span className="flex-1 text-sm font-medium" style={{ color: cat.color }}>{cat.name}</span>
+                      <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: cat.color }} />
+                      {!cat.isDefault && (
+                        <>
+                          <button onClick={() => setEditingCat(cat)} className="text-xs text-smc-muted hover:text-white px-1">✏</button>
+                          <button onClick={() => handleDeleteCategory(cat.id)} className="text-xs text-danger hover:text-red-400 px-1">✕</button>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Add new category from manager */}
+            {addingCat ? (
+              <div className="mt-3 p-3 bg-smc-darker rounded-lg border border-smc-border space-y-2">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    maxLength={2}
+                    value={newCatForm.emoji}
+                    onChange={e => setNewCatForm(f => ({ ...f, emoji: e.target.value }))}
+                    placeholder="🏷"
+                    className="input-field w-12 text-center px-1"
+                  />
+                  <input
+                    type="text"
+                    value={newCatForm.name}
+                    onChange={e => setNewCatForm(f => ({ ...f, name: e.target.value }))}
+                    placeholder="Nombre de categoría..."
+                    className="input-field flex-1"
+                  />
+                </div>
+                <div className="flex gap-1.5 flex-wrap">
+                  {PALETTE.map(c => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setNewCatForm(f => ({ ...f, color: c }))}
+                      className={`w-6 h-6 rounded-full border-2 transition-transform ${newCatForm.color === c ? 'scale-125 border-white' : 'border-transparent'}`}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button type="button" onClick={() => setAddingCat(false)} className="btn-secondary text-xs py-1">Cancelar</button>
+                  <button type="button" onClick={handleAddCategory} className="btn-primary text-xs py-1">Añadir</button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAddingCat(true)}
+                className="w-full mt-3 flex items-center justify-center gap-1 text-sm text-smc-muted hover:text-white border border-dashed border-smc-border hover:border-primary/40 rounded-lg py-2 transition-colors"
+              >
+                <Plus className="w-4 h-4" /> Nueva categoría
+              </button>
+            )}
+
+            <button onClick={() => setShowCatManager(false)} className="btn-secondary w-full mt-3 text-sm py-1.5">
+              Cerrar
+            </button>
           </div>
         </div>
       )}

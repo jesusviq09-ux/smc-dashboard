@@ -35,11 +35,13 @@ export default function PilotDetail() {
   const [noteModal, setNoteModal] = useState(false)
   const [noteContent, setNoteContent] = useState('')
   const [noteAuthor, setNoteAuthor] = useState('')
+  const [noteError, setNoteError] = useState<string | null>(null)
 
   // Evolution modal state
   const [evolutionModal, setEvolutionModal] = useState(false)
   const [evoDate, setEvoDate] = useState(new Date().toISOString().split('T')[0])
   const [evoNotes, setEvoNotes] = useState('')
+  const [evoError, setEvoError] = useState<string | null>(null)
   const [evoRatings, setEvoRatings] = useState<PilotRatings>({
     experience: 5, driving: 5, energyManagement: 5,
     teamwork: 5, consistency: 5, adaptation: 5,
@@ -58,6 +60,7 @@ export default function PilotDetail() {
     queryKey: ['pilot-history', id],
     queryFn: () => pilotsApi.getRatingHistory(id!),
     enabled: !!id,
+    staleTime: 0,
   })
 
   const { data: notes = [] } = useQuery({
@@ -85,6 +88,10 @@ export default function PilotDetail() {
       setNoteModal(false)
       setNoteContent('')
       setNoteAuthor('')
+      setNoteError(null)
+    },
+    onError: (err: any) => {
+      setNoteError(err?.response?.data?.error || 'Error al guardar la nota. Inténtalo de nuevo.')
     },
   })
 
@@ -98,6 +105,10 @@ export default function PilotDetail() {
       queryClient.invalidateQueries({ queryKey: ['pilot-history', id] })
       setEvolutionModal(false)
       setEvoNotes('')
+      setEvoError(null)
+    },
+    onError: (err: any) => {
+      setEvoError(err?.response?.data?.error || 'Error al guardar la evolución. Inténtalo de nuevo.')
     },
   })
 
@@ -363,11 +374,11 @@ export default function PilotDetail() {
       {/* Note Modal */}
       <Modal
         isOpen={noteModal}
-        onClose={() => setNoteModal(false)}
+        onClose={() => { setNoteModal(false); setNoteError(null) }}
         title="Añadir nota"
         footer={
           <>
-            <button onClick={() => setNoteModal(false)} className="btn-secondary">Cancelar</button>
+            <button onClick={() => { setNoteModal(false); setNoteError(null) }} className="btn-secondary">Cancelar</button>
             <button
               onClick={() => addNoteMutation.mutate()}
               disabled={!noteContent.trim() || addNoteMutation.isPending}
@@ -399,6 +410,11 @@ export default function PilotDetail() {
               onChange={e => setNoteAuthor(e.target.value)}
             />
           </div>
+          {noteError && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+              {noteError}
+            </div>
+          )}
         </div>
       </Modal>
 

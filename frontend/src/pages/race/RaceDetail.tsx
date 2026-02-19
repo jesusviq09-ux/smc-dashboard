@@ -25,8 +25,12 @@ const PRIORITY_MODES: { value: RacePriorityMode; label: string; desc: string }[]
 export default function RaceDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const [priorityMode, setPriorityMode] = useState<RacePriorityMode>('FINISH')
-  const [recommendation, setRecommendation] = useState<ReturnType<typeof generateRecommendation> | null>(null)
+  // Multi-variant: generate all 3 modes at once
+  type RecommendationVariant = { mode: RacePriorityMode; result: ReturnType<typeof generateRecommendation> }
+  const [recommendationVariants, setRecommendationVariants] = useState<RecommendationVariant[] | null>(null)
+  const [activeVariant, setActiveVariant] = useState<RacePriorityMode>('FINISH')
+  // Derived: the currently visible recommendation
+  const recommendation = recommendationVariants?.find(v => v.mode === activeVariant)?.result ?? null
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [strategyTab, setStrategyTab] = useState<'auto' | 'manual'>('auto')
@@ -92,26 +96,21 @@ export default function RaceDetail() {
   const handleCategoryChange = (cat: RaceCategory) => {
     setActiveCategory(cat)
     // Reset strategy and AI when switching category
-    setRecommendation(null)
+    setRecommendationVariants(null)
     setAiResult(null)
     setAiError(null)
   }
 
-  // ── Strategy generation ──────────────────────────────────────────────────────
+  // ── Strategy generation — all 3 variants at once ─────────────────────────────
   const handleGenerateStrategy = () => {
     if (!vehicles || !pilots.length) return
-
-    const result = generateRecommendation({
-      category,
-      durationMinutes,
-      vehicles,
-      pilots,
-      priorityMode,
-      circuit: circuit ?? undefined,
-    })
-
-    setRecommendation(result)
-    // Reset AI analysis when strategy is regenerated
+    const modes: RacePriorityMode[] = ['FINISH', 'WIN', 'DEVELOP_JUNIORS']
+    const variants = modes.map(mode => ({
+      mode,
+      result: generateRecommendation({ category, durationMinutes, vehicles, pilots, priorityMode: mode, circuit: circuit ?? undefined }),
+    }))
+    setRecommendationVariants(variants)
+    setActiveVariant('FINISH')
     setAiResult(null)
     setAiError(null)
   }
@@ -126,7 +125,7 @@ export default function RaceDetail() {
           raceId: id,
           vehicleId: assignment.vehicle.id,
           category,
-          priorityMode,
+          priorityMode: activeVariant,
           stints: assignment.stints.map(s => ({
             id: crypto.randomUUID(),
             strategyId: '',
@@ -157,7 +156,7 @@ export default function RaceDetail() {
     try {
       const payload: AnalysisPayload = {
         recommendation,
-        input: { category, durationMinutes, priorityMode },
+        input: { category, durationMinutes, priorityMode: activeVariant },
         circuit: circuit ?? undefined,
         pilots,
       }
@@ -199,7 +198,12 @@ export default function RaceDetail() {
     }).filter(Boolean) as typeof recommendation.vehicleAssignments
 
     if (newAssignments.length > 0) {
-      setRecommendation({ ...recommendation, vehicleAssignments: newAssignments })
+      // Update the active variant's result with the AI suggestion
+      setRecommendationVariants(prev => prev?.map(v =>
+        v.mode === activeVariant
+          ? { ...v, result: { ...recommendation, vehicleAssignments: newAssignments } }
+          : v
+      ) ?? null)
       setAiResult(null) // Clear AI panel after applying
     }
   }
@@ -322,26 +326,24 @@ export default function RaceDetail() {
                   )}
                 </span>
               </div>
-              <div>
-                <label className="label">Modo de prioridad</label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Variant tabs — only shown after generating */}
+              {recommendationVariants && (
+                <div className="flex gap-2">
                   {PRIORITY_MODES.map(mode => (
                     <button
                       key={mode.value}
-                      onClick={() => setPriorityMode(mode.value)}
-                      type="button"
-                      className={`p-3 rounded-xl border text-left transition-colors ${
-                        priorityMode === mode.value
-                          ? 'border-primary bg-primary/10'
-                          : 'border-smc-border hover:border-primary/30'
+                      onClick={() => setActiveVariant(mode.value)}
+                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold border transition-colors ${
+                        activeVariant === mode.value
+                          ? 'bg-primary text-white border-primary'
+                          : 'bg-smc-darker text-smc-muted border-smc-border hover:border-primary/40 hover:text-smc-text'
                       }`}
                     >
-                      <p className="font-medium text-white text-sm">{mode.label}</p>
-                      <p className="text-xs text-smc-muted mt-0.5">{mode.desc}</p>
+                      {mode.label}
                     </button>
                   ))}
                 </div>
-              </div>
+              )}
 
               <div className="flex flex-wrap gap-3">
                 <button onClick={handleGenerateStrategy} className="btn-primary flex items-center gap-2">

@@ -8,9 +8,14 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  useDroppable,
-  useDraggable,
 } from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { CheckCircle2, Clock, Minus, Plus, Wand2, GripVertical, UtensilsCrossed, PlusCircle, X } from 'lucide-react'
 import { trainingApi } from '@/services/api/training.api'
 import { TrainingObjective } from '@/types'
@@ -55,6 +60,9 @@ const STEP = 5
 const LUNCH_DURATION = 45
 const LUNCH_WINDOW_START = 13 * 60   // 13:00 in minutes
 const LUNCH_WINDOW_END   = 14 * 60   // 14:00 in minutes
+
+// px per minute — determines visual height of each block
+const PX_PER_MIN = 2.2
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -124,7 +132,6 @@ function generateBlocks(
   const afterMinutes  = Math.max(0, totalMinutes - lunchEndOffset)
 
   // Split objectives proportionally between before/after
-  const totalActivity = beforeMinutes + afterMinutes
   const totalImportance = sorted.reduce((s, o) => s + (importances[o] ?? 5), 0)
 
   // Distribute objectives: first half before, rest after (by importance weight)
@@ -202,37 +209,105 @@ function buildProportionalBlocks(
   })
 }
 
-// ─── Draggable panel item ─────────────────────────────────────────────────────
+// ─── Sortable block (draggable within timeline) ────────────────────────────────
 
-function DraggablePanelBlock({ id, label, color, durationMinutes }: {
-  id: string; label: string; color: string; durationMinutes: number
+function SortableBlock({
+  block,
+  sessionStartMin,
+  onAdjust,
+  onRemove,
+}: {
+  block: ScheduleBlock
+  sessionStartMin: number
+  onAdjust: (delta: number) => void
+  onRemove: () => void
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id })
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: block.id, disabled: !!block.isFixed })
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    height: `${Math.max(44, block.durationMinutes * PX_PER_MIN)}px`,
+  }
+
+  const blockStart = minutesToTime(sessionStartMin, block.startMinute)
+  const blockEnd   = minutesToTime(sessionStartMin, block.startMinute + block.durationMinutes)
+  const tall = block.durationMinutes * PX_PER_MIN >= 60
+
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-grab active:cursor-grabbing transition-opacity ${
-        isDragging ? 'opacity-40' : 'opacity-100'
-      }`}
-      style={{ borderColor: color + '60', backgroundColor: color + '15' }}
+      style={{
+        ...style,
+        borderColor: block.color + '60',
+        backgroundColor: block.color + '20',
+      }}
+      className="rounded-lg border overflow-hidden flex flex-col touch-none"
     >
-      <GripVertical className="w-3.5 h-3.5 text-smc-muted flex-shrink-0" />
-      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-      <span className="text-xs text-smc-text truncate flex-1">{label}</span>
-      <span className="text-xs text-smc-muted flex-shrink-0">{durationMinutes}m</span>
-    </div>
-  )
-}
+      <div className="flex items-start justify-between px-2.5 pt-1.5 pb-1 flex-1 min-h-0">
+        <div className="min-w-0 flex-1 flex items-start gap-1.5">
+          {/* Drag handle — only for non-fixed blocks */}
+          {!block.isFixed ? (
+            <button
+              {...listeners}
+              {...attributes}
+              className="mt-0.5 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
+              tabIndex={-1}
+            >
+              <GripVertical className="w-3 h-3 text-smc-muted/60 hover:text-smc-muted" />
+            </button>
+          ) : (
+            <UtensilsCrossed className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: block.color }} />
+          )}
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-white truncate leading-tight">{block.label}</p>
+            {tall && (
+              <p className="text-xs text-smc-muted font-mono mt-0.5">
+                {blockStart} – {blockEnd} · <span className="text-white">{block.durationMinutes} min</span>
+              </p>
+            )}
+            {!tall && (
+              <p className="text-xs text-smc-muted">{block.durationMinutes} min</p>
+            )}
+          </div>
+        </div>
 
-// ─── Droppable timeline slot ──────────────────────────────────────────────────
-
-function DroppableSlot({ index, children }: { index: number; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `slot_${index}` })
-  return (
-    <div ref={setNodeRef} className={`transition-all ${isOver ? 'ring-2 ring-primary/60 ring-inset rounded-lg' : ''}`}>
-      {children}
+        <div className="flex items-center gap-0.5 ml-1 flex-shrink-0">
+          {!block.isFixed && (
+            <>
+              <button
+                onClick={() => onAdjust(+STEP)}
+                className="w-5 h-5 rounded flex items-center justify-center hover:bg-white/10"
+              >
+                <Plus className="w-3 h-3 text-smc-muted" />
+              </button>
+              <button
+                onClick={() => onAdjust(-STEP)}
+                disabled={block.durationMinutes <= MIN_BLOCK_MINUTES}
+                className="w-5 h-5 rounded flex items-center justify-center hover:bg-white/10 disabled:opacity-30"
+              >
+                <Minus className="w-3 h-3 text-smc-muted" />
+              </button>
+            </>
+          )}
+          {(block.objective === 'custom' as any || block.id === 'lunch') && (
+            <button
+              onClick={onRemove}
+              className="w-5 h-5 rounded flex items-center justify-center hover:bg-white/10 ml-0.5"
+            >
+              <X className="w-3 h-3 text-smc-muted" />
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -254,24 +329,7 @@ export default function TrainingScheduleBuilder({ sessionId, startTime, endTime,
 
   const totalUsed = blocks.reduce((s, b) => s + b.durationMinutes, 0)
   const hourMarkers = buildHourMarkers(sessionStartMin, totalMinutes)
-
-  // ─── Panel blocks (for drag source) ────────────────────────────────────────
-
-  // Panel shows existing blocks + lunch if not present + custom option
   const hasLunch = blocks.some(b => b.id === 'lunch')
-
-  const panelItems: ScheduleBlock[] = [
-    ...blocks,
-    ...(!hasLunch ? [{
-      id: 'panel_lunch',
-      objective: 'lunch' as any,
-      label: 'Comida',
-      startMinute: 0,
-      durationMinutes: LUNCH_DURATION,
-      color: OBJECTIVE_META['lunch'].color,
-      isFixed: true,
-    }] : []),
-  ]
 
   // ─── Adjust block duration ────────────────────────────────────────────────
 
@@ -305,7 +363,7 @@ export default function TrainingScheduleBuilder({ sessionId, startTime, endTime,
     })
   }, [])
 
-  // ─── Drag & drop handlers ─────────────────────────────────────────────────
+  // ─── Drag handlers ────────────────────────────────────────────────────────
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(String(event.active.id))
@@ -314,54 +372,43 @@ export default function TrainingScheduleBuilder({ sessionId, startTime, endTime,
   const handleDragEnd = (event: DragEndEvent) => {
     setActiveId(null)
     const { active, over } = event
-    if (!over) return
-
-    const draggedId = String(active.id)
-    const overSlotId = String(over.id)
-
-    if (!overSlotId.startsWith('slot_')) return
-    const targetIdx = parseInt(overSlotId.replace('slot_', ''), 10)
-
+    if (!over || active.id === over.id) return
     setBlocks(prev => {
-      const fromIdx = prev.findIndex(b => b.id === draggedId)
+      const oldIdx = prev.findIndex(b => b.id === active.id)
+      const newIdx = prev.findIndex(b => b.id === over.id)
+      if (oldIdx < 0 || newIdx < 0) return prev
+      return recomputeStarts(arrayMove(prev, oldIdx, newIdx))
+    })
+  }
 
-      if (fromIdx >= 0) {
-        // Reorder existing block
-        if (fromIdx === targetIdx) return prev
-        const next = [...prev]
-        const [moved] = next.splice(fromIdx, 1)
-        const insertAt = targetIdx > fromIdx ? targetIdx - 1 : targetIdx
-        next.splice(insertAt, 0, moved)
-        return recomputeStarts(next)
+  // ─── Add lunch ────────────────────────────────────────────────────────────
+
+  const addLunch = () => {
+    setBlocks(prev => {
+      const lunchBlock: ScheduleBlock = {
+        id: 'lunch',
+        objective: 'lunch' as any,
+        label: 'Comida',
+        startMinute: 0,
+        durationMinutes: LUNCH_DURATION,
+        color: OBJECTIVE_META['lunch'].color,
+        isFixed: true,
       }
-
-      // Adding panel_lunch from the side panel
-      if (draggedId === 'panel_lunch') {
-        const lunchBlock: ScheduleBlock = {
-          id: 'lunch',
-          objective: 'lunch' as any,
-          label: 'Comida',
-          startMinute: 0,
-          durationMinutes: LUNCH_DURATION,
-          color: OBJECTIVE_META['lunch'].color,
-          isFixed: true,
-        }
-        const next = [...prev]
-        next.splice(targetIdx, 0, lunchBlock)
-        // Redistribute: remove 45 min from non-fixed blocks
-        const nonFixed = next.filter(b => !b.isFixed && b.id !== 'lunch')
-        if (nonFixed.length > 0) {
-          const perBlock = Math.floor(LUNCH_DURATION / nonFixed.length)
-          let rem = LUNCH_DURATION - perBlock * nonFixed.length
-          nonFixed.forEach((b, i) => {
-            b.durationMinutes = Math.max(MIN_BLOCK_MINUTES, b.durationMinutes - perBlock - (i === nonFixed.length - 1 ? rem : 0))
-            if (i === nonFixed.length - 1) rem = 0
-          })
-        }
-        return recomputeStarts(next)
+      // Insert after first half of blocks
+      const insertAt = Math.floor(prev.length / 2)
+      const next = [...prev]
+      next.splice(insertAt, 0, lunchBlock)
+      // Redistribute: remove 45 min from non-fixed blocks
+      const nonFixed = next.filter(b => !b.isFixed)
+      if (nonFixed.length > 0) {
+        const perBlock = Math.floor(LUNCH_DURATION / nonFixed.length)
+        let rem = LUNCH_DURATION - perBlock * nonFixed.length
+        nonFixed.forEach((b, i) => {
+          b.durationMinutes = Math.max(MIN_BLOCK_MINUTES, b.durationMinutes - perBlock - (i === nonFixed.length - 1 ? rem : 0))
+          if (i === nonFixed.length - 1) rem = 0
+        })
       }
-
-      return prev
+      return recomputeStarts(next)
     })
   }
 
@@ -444,11 +491,9 @@ export default function TrainingScheduleBuilder({ sessionId, startTime, endTime,
     },
   })
 
-  // ─── Active drag overlay item ─────────────────────────────────────────────
+  // ─── Active drag overlay ──────────────────────────────────────────────────
 
-  const activeBlock = activeId
-    ? (blocks.find(b => b.id === activeId) ?? panelItems.find(p => p.id === activeId))
-    : null
+  const activeBlock = activeId ? blocks.find(b => b.id === activeId) : null
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -461,8 +506,6 @@ export default function TrainingScheduleBuilder({ sessionId, startTime, endTime,
       </div>
     )
   }
-
-  const timelineHeight = Math.max(360, totalMinutes * 1.4)
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -500,119 +543,68 @@ export default function TrainingScheduleBuilder({ sessionId, startTime, endTime,
 
           {/* Timeline */}
           <div className="flex-1 flex gap-3">
-            {/* Hour labels */}
-            <div className="relative flex-shrink-0 w-12" style={{ height: `${timelineHeight}px` }}>
-              <div className="absolute top-0"><span className="text-xs text-smc-muted font-mono">{startTime}</span></div>
-              {hourMarkers.map(m => (
-                <div key={m.label} className="absolute" style={{ top: `${(m.offsetMin / totalMinutes) * 100}%` }}>
-                  <span className="text-xs text-smc-muted font-mono">{m.label}</span>
-                </div>
-              ))}
-              <div className="absolute bottom-0"><span className="text-xs text-smc-muted font-mono">{endTime}</span></div>
+            {/* Hour labels column */}
+            <div className="flex-shrink-0 w-12 relative">
+              {/* We'll overlay hour labels by using absolute within a relative wrapper that matches the timeline */}
+              <div className="absolute top-0 left-0 w-full">
+                <span className="text-xs text-smc-muted font-mono">{startTime}</span>
+              </div>
+              {hourMarkers.map(m => {
+                // Calculate the px offset based on cumulative block heights up to this offsetMin
+                const pxOffset = m.offsetMin * PX_PER_MIN
+                return (
+                  <div key={m.label} className="absolute left-0 w-full" style={{ top: `${pxOffset}px` }}>
+                    <span className="text-xs text-smc-muted font-mono">{m.label}</span>
+                  </div>
+                )
+              })}
             </div>
 
             {/* Vertical rule */}
-            <div className="flex-shrink-0 w-px bg-smc-border relative" style={{ height: `${timelineHeight}px` }}>
+            <div
+              className="flex-shrink-0 w-px bg-smc-border relative"
+              style={{ minHeight: `${totalMinutes * PX_PER_MIN}px` }}
+            >
               {hourMarkers.map(m => (
-                <div key={m.label} className="absolute left-0 w-2 h-px bg-smc-border" style={{ top: `${(m.offsetMin / totalMinutes) * 100}%` }} />
-              ))}
-            </div>
-
-            {/* Blocks */}
-            <div className="flex-1 relative" style={{ height: `${timelineHeight}px` }}>
-              {blocks.map((block, idx) => {
-                const topPct    = (block.startMinute / totalMinutes) * 100
-                const heightPct = (block.durationMinutes / totalMinutes) * 100
-                const blockStart = minutesToTime(sessionStartMin, block.startMinute)
-                const blockEnd   = minutesToTime(sessionStartMin, block.startMinute + block.durationMinutes)
-
-                return (
-                  <DroppableSlot key={block.id} index={idx}>
-                    <div
-                      className="absolute left-0 right-2 rounded-lg border overflow-hidden flex flex-col"
-                      style={{
-                        top: `${topPct}%`,
-                        height: `${heightPct}%`,
-                        minHeight: '38px',
-                        borderColor: block.color + '60',
-                        backgroundColor: block.color + '20',
-                      }}
-                    >
-                      <div className="flex items-start justify-between px-2.5 pt-1.5 pb-1 flex-1 min-h-0">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 mb-0.5">
-                            {!block.isFixed && (
-                              <GripVertical className="w-3 h-3 text-smc-muted/50 flex-shrink-0 cursor-grab" />
-                            )}
-                            {block.id === 'lunch' && <UtensilsCrossed className="w-3 h-3 flex-shrink-0" style={{ color: block.color }} />}
-                            <span className="text-xs font-semibold text-white truncate">{block.label}</span>
-                          </div>
-                          <div className="text-xs text-smc-muted font-mono">
-                            {blockStart} – {blockEnd} · <span className="text-white">{block.durationMinutes} min</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1 ml-2 flex-shrink-0">
-                          {/* ±5 only for non-fixed */}
-                          {!block.isFixed && (
-                            <>
-                              <button onClick={() => adjustBlock(block.id, +STEP)} className="w-5 h-5 rounded flex items-center justify-center hover:bg-white/10">
-                                <Plus className="w-3 h-3 text-smc-muted" />
-                              </button>
-                              <button onClick={() => adjustBlock(block.id, -STEP)} disabled={block.durationMinutes <= MIN_BLOCK_MINUTES} className="w-5 h-5 rounded flex items-center justify-center hover:bg-white/10 disabled:opacity-30">
-                                <Minus className="w-3 h-3 text-smc-muted" />
-                              </button>
-                            </>
-                          )}
-                          {/* Remove non-lunch custom or re-added lunch */}
-                          {(block.objective === 'custom' as any || block.id === 'lunch') && (
-                            <button onClick={() => removeBlock(block.id)} className="w-5 h-5 rounded flex items-center justify-center hover:bg-white/10 ml-0.5">
-                              <X className="w-3 h-3 text-smc-muted" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </DroppableSlot>
-                )
-              })}
-              {/* Drop zone at end */}
-              <DroppableSlot index={blocks.length}>
-                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 2, height: '20px' }} />
-              </DroppableSlot>
-            </div>
-          </div>
-
-          {/* Side panel */}
-          <div className="w-44 flex-shrink-0 space-y-3">
-            <p className="text-xs font-semibold text-smc-muted uppercase tracking-wide">Bloques</p>
-
-            {/* Existing blocks (for reordering) */}
-            <div className="space-y-1.5">
-              {blocks.map(block => (
-                <DraggablePanelBlock
-                  key={`panel_${block.id}`}
-                  id={block.id}
-                  label={block.label}
-                  color={block.color}
-                  durationMinutes={block.durationMinutes}
+                <div
+                  key={m.label}
+                  className="absolute left-0 w-2 h-px bg-smc-border"
+                  style={{ top: `${m.offsetMin * PX_PER_MIN}px` }}
                 />
               ))}
             </div>
 
+            {/* Sortable blocks */}
+            <div className="flex-1 flex flex-col gap-0.5">
+              <SortableContext items={blocks.map(b => b.id)} strategy={verticalListSortingStrategy}>
+                {blocks.map(block => (
+                  <SortableBlock
+                    key={block.id}
+                    block={block}
+                    sessionStartMin={sessionStartMin}
+                    onAdjust={delta => adjustBlock(block.id, delta)}
+                    onRemove={() => removeBlock(block.id)}
+                  />
+                ))}
+              </SortableContext>
+            </div>
+          </div>
+
+          {/* Side panel — add blocks */}
+          <div className="w-44 flex-shrink-0 space-y-3">
+            <p className="text-xs font-semibold text-smc-muted uppercase tracking-wide">Añadir</p>
+
             {/* Add lunch if not present */}
             {!hasLunch && (
-              <>
-                <div className="border-t border-smc-border pt-2">
-                  <p className="text-xs text-smc-muted mb-1.5">Añadir</p>
-                  <DraggablePanelBlock
-                    id="panel_lunch"
-                    label="Comida"
-                    color={OBJECTIVE_META['lunch'].color}
-                    durationMinutes={LUNCH_DURATION}
-                  />
-                </div>
-              </>
+              <button
+                onClick={addLunch}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors hover:border-yellow-500/60 hover:bg-yellow-500/10"
+                style={{ borderColor: OBJECTIVE_META['lunch'].color + '40', backgroundColor: OBJECTIVE_META['lunch'].color + '10' }}
+              >
+                <UtensilsCrossed className="w-3.5 h-3.5 flex-shrink-0" style={{ color: OBJECTIVE_META['lunch'].color }} />
+                <span className="text-xs text-smc-text flex-1 text-left">Comida</span>
+                <span className="text-xs text-smc-muted flex-shrink-0">{LUNCH_DURATION}m</span>
+              </button>
             )}
 
             {/* Custom block */}
@@ -634,6 +626,11 @@ export default function TrainingScheduleBuilder({ sessionId, startTime, endTime,
                 Añadir (30 min)
               </button>
             </div>
+
+            {/* Hint */}
+            <p className="text-xs text-smc-muted/60 pt-1 leading-snug">
+              Arrastra el grip <GripVertical className="inline w-3 h-3" /> para reordenar bloques
+            </p>
           </div>
         </div>
 
@@ -673,6 +670,7 @@ export default function TrainingScheduleBuilder({ sessionId, startTime, endTime,
             style={{ borderColor: activeBlock.color + '60', backgroundColor: activeBlock.color + '30', minWidth: '130px' }}
           >
             <div className="flex items-center gap-2">
+              <GripVertical className="w-3.5 h-3.5 text-smc-muted" />
               <span className="w-2 h-2 rounded-full" style={{ backgroundColor: activeBlock.color }} />
               <span className="text-xs font-semibold text-white">{activeBlock.label}</span>
               <span className="text-xs text-smc-muted ml-auto">{activeBlock.durationMinutes}m</span>

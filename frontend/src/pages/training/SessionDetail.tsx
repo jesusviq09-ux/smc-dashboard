@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ChevronLeft, Plus, Activity, Clock, Zap, Thermometer, Pencil, Trash2, CalendarClock, UtensilsCrossed } from 'lucide-react'
+import { ChevronLeft, Plus, Activity, Clock, Zap, Thermometer, Pencil, Trash2, CalendarClock, UtensilsCrossed, CalendarRange } from 'lucide-react'
 import { useState } from 'react'
 import { trainingApi } from '@/services/api/training.api'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -10,6 +10,8 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { ScheduleBlock } from './TrainingScheduleBuilder'
+import TrainingScheduleBuilder from './TrainingScheduleBuilder'
+import { TrainingObjective } from '@/types'
 
 // ─── Read-only schedule timeline ──────────────────────────────────────────────
 
@@ -95,6 +97,7 @@ export default function SessionDetail() {
   const [stintModal, setStintModal] = useState(false)
   const [editModal, setEditModal] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [editingSchedule, setEditingSchedule] = useState(false)
   const [editForm, setEditForm] = useState({ date: '', locationId: '', vehicleId: '', durationMinutes: 0, notes: '' })
   const [lapInput, setLapInput] = useState('')
   const [telemetry, setTelemetry] = useState({
@@ -162,6 +165,40 @@ export default function SessionDetail() {
 
   if (isLoading) return <div className="skeleton h-96 rounded-xl" />
   if (!session) return <p className="text-smc-muted">Sesión no encontrada</p>
+
+  // ─── Edit schedule mode ───────────────────────────────────────────────────────
+  if (editingSchedule) {
+    // Recover objectives and importances from the notes JSON
+    let scheduleStartTime = '09:00'
+    let scheduleEndTime = '11:00'
+    let scheduleObjectives: TrainingObjective[] = []
+    let scheduleImportances: Record<string, number> = {}
+    try {
+      const parsed = JSON.parse((session as any).notes ?? '')
+      scheduleStartTime = parsed?.startTime ?? scheduleStartTime
+      scheduleEndTime = parsed?.endTime ?? scheduleEndTime
+      scheduleImportances = parsed?.importances ?? {}
+      // Extract unique non-special objectives from existing schedule blocks
+      const existing: TrainingObjective[] = (parsed?.schedule ?? [])
+        .map((b: ScheduleBlock) => b.objective)
+        .filter((o: string) => o !== 'lunch' && o !== 'custom') as TrainingObjective[]
+      scheduleObjectives = [...new Set(existing)]
+    } catch { /* use defaults */ }
+
+    return (
+      <TrainingScheduleBuilder
+        sessionId={id!}
+        startTime={scheduleStartTime}
+        endTime={scheduleEndTime}
+        objectives={scheduleObjectives}
+        importances={scheduleImportances}
+        onDone={() => {
+          queryClient.invalidateQueries({ queryKey: ['training-session', id] })
+          setEditingSchedule(false)
+        }}
+      />
+    )
+  }
 
   const handleAddStint = () => {
     const rawTimes = lapInput.split(/[\n,;]+/).map(t => t.trim()).filter(Boolean)
@@ -265,7 +302,17 @@ export default function SessionDetail() {
           const endTime: string   = parsed?.endTime
           if (!schedule?.length || !startTime || !endTime) return null
           return (
-            <Card title="Horario planificado">
+            <Card
+              title="Horario planificado"
+              action={
+                <button
+                  onClick={() => setEditingSchedule(true)}
+                  className="btn-secondary flex items-center gap-1.5 text-xs py-1.5"
+                >
+                  <CalendarRange className="w-3.5 h-3.5" /> Editar horario
+                </button>
+              }
+            >
               <CardContent>
                 <ScheduleTimeline blocks={schedule} startTime={startTime} endTime={endTime} />
                 {/* Legend */}
