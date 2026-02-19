@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { ChevronLeft, Plus, Activity, Clock, Zap, Thermometer, Pencil, Trash2 } from 'lucide-react'
+import { ChevronLeft, Plus, Activity, Clock, Zap, Thermometer, Pencil, Trash2, CalendarClock, UtensilsCrossed } from 'lucide-react'
 import { useState } from 'react'
 import { trainingApi } from '@/services/api/training.api'
 import { Card, CardContent } from '@/components/ui/Card'
@@ -9,6 +9,84 @@ import { calculateLapStats, formatLapTime } from '@/utils/lapStatistics'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
+import { ScheduleBlock } from './TrainingScheduleBuilder'
+
+// ─── Read-only schedule timeline ──────────────────────────────────────────────
+
+function ScheduleTimeline({ blocks, startTime, endTime }: {
+  blocks: ScheduleBlock[]
+  startTime: string
+  endTime: string
+}) {
+  function toMin(hhmm: string) {
+    const [h, m] = hhmm.split(':').map(Number)
+    return (h ?? 0) * 60 + (m ?? 0)
+  }
+  function fromMin(base: number, offset: number) {
+    const t = base + offset
+    return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`
+  }
+
+  const sessionStartMin = toMin(startTime)
+  const totalMinutes = Math.max(1, toMin(endTime) - sessionStartMin)
+  const height = Math.max(240, totalMinutes * 1.2)
+
+  // Hour markers
+  const markers: { label: string; pct: number }[] = []
+  const firstHour = Math.ceil(sessionStartMin / 60) * 60
+  for (let t = firstHour; t < sessionStartMin + totalMinutes; t += 60) {
+    markers.push({ label: `${String(Math.floor(t / 60)).padStart(2, '0')}:00`, pct: ((t - sessionStartMin) / totalMinutes) * 100 })
+  }
+
+  return (
+    <div className="flex gap-3">
+      {/* Hour labels */}
+      <div className="relative flex-shrink-0 w-12" style={{ height }}>
+        <span className="absolute top-0 text-xs text-smc-muted font-mono">{startTime}</span>
+        {markers.map(m => (
+          <span key={m.label} className="absolute text-xs text-smc-muted font-mono" style={{ top: `${m.pct}%` }}>{m.label}</span>
+        ))}
+        <span className="absolute bottom-0 text-xs text-smc-muted font-mono">{endTime}</span>
+      </div>
+
+      {/* Rule */}
+      <div className="flex-shrink-0 w-px bg-smc-border relative" style={{ height }}>
+        {markers.map(m => (
+          <div key={m.label} className="absolute left-0 w-2 h-px bg-smc-border" style={{ top: `${m.pct}%` }} />
+        ))}
+      </div>
+
+      {/* Blocks */}
+      <div className="flex-1 relative" style={{ height }}>
+        {blocks.map(block => {
+          const topPct    = (block.startMinute / totalMinutes) * 100
+          const heightPct = (block.durationMinutes / totalMinutes) * 100
+          return (
+            <div
+              key={block.id}
+              className="absolute left-0 right-2 rounded-lg border flex flex-col justify-center px-3 py-1"
+              style={{
+                top: `${topPct}%`,
+                height: `${heightPct}%`,
+                minHeight: '32px',
+                borderColor: block.color + '60',
+                backgroundColor: block.color + '20',
+              }}
+            >
+              <div className="flex items-center gap-1.5">
+                {block.id === 'lunch' && <UtensilsCrossed className="w-3 h-3 flex-shrink-0" style={{ color: block.color }} />}
+                <span className="text-xs font-semibold text-white truncate">{block.label}</span>
+              </div>
+              <span className="text-xs text-smc-muted font-mono">
+                {fromMin(sessionStartMin, block.startMinute)} – {fromMin(sessionStartMin, block.startMinute + block.durationMinutes)} · {block.durationMinutes} min
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 export default function SessionDetail() {
   const { id } = useParams<{ id: string }>()
@@ -177,6 +255,33 @@ export default function SessionDetail() {
           </p>
         </div>
       </div>
+
+      {/* Planned schedule (parsed from notes JSON) */}
+      {(() => {
+        try {
+          const parsed = JSON.parse((session as any).notes ?? '')
+          const schedule: ScheduleBlock[] = parsed?.schedule
+          const startTime: string = parsed?.startTime
+          const endTime: string   = parsed?.endTime
+          if (!schedule?.length || !startTime || !endTime) return null
+          return (
+            <Card title="Horario planificado">
+              <CardContent>
+                <ScheduleTimeline blocks={schedule} startTime={startTime} endTime={endTime} />
+                {/* Legend */}
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-4 pt-3 border-t border-smc-border">
+                  {schedule.map(b => (
+                    <div key={b.id} className="flex items-center gap-1.5 text-xs text-smc-muted">
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: b.color }} />
+                      {b.label}: <span className="text-white font-medium">{b.durationMinutes} min</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )
+        } catch { return null }
+      })()}
 
       {/* Lap times chart */}
       {lapChartData.length > 0 && (
