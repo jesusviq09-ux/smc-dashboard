@@ -241,44 +241,103 @@ export default function CalendarIndex() {
   // ─── PDF export ───────────────────────────────────────────────────────────
 
   const exportCalendarPDF = () => {
-    const doc = new jsPDF()
+    const doc = new jsPDF({ orientation: 'landscape' })
     const monthLabel = format(currentMonth, 'MMMM yyyy', { locale: es })
-    doc.setFontSize(18)
-    doc.setTextColor(0, 212, 255)
-    doc.text(`SMC Greenpower — Calendario · ${monthLabel}`, 14, 20)
-    doc.setFontSize(10)
-    doc.setTextColor(150)
-    doc.text(`Generado: ${new Date().toLocaleString('es-ES')}`, 14, 28)
 
-    const monthEvents = allEvents
-      .filter(e => isSameMonth(parseISO(e.date), currentMonth))
-      .sort((a, b) => a.date.localeCompare(b.date))
+    // Cabecera — sin emojis (jsPDF/Helvetica no los soporta)
+    doc.setFontSize(16)
+    doc.setTextColor(0, 180, 220)
+    doc.text(`SMC Greenpower - Calendario: ${monthLabel}`, 14, 16)
+    doc.setFontSize(8)
+    doc.setTextColor(130, 130, 130)
+    doc.text(`Generado: ${new Date().toLocaleString('es-ES')}`, 14, 22)
 
-    if (monthEvents.length === 0) {
-      doc.setFontSize(11)
-      doc.setTextColor(180)
-      doc.text('No hay eventos este mes.', 14, 40)
-    } else {
-      autoTable(doc, {
-        startY: 34,
-        head: [['Fecha', 'Tipo', 'Título']],
-        body: monthEvents.map(ev => {
-          const label = getEventLabel(ev.type)
-          const typeName = SYSTEM_TYPE_NAMES[ev.type]
-            ?? getCategoryById(ev.type)?.name
-            ?? 'Evento'
-          return [
-            format(parseISO(ev.date), "d MMM", { locale: es }),
-            `${label} ${typeName}`,
-            ev.title,
-          ]
-        }),
-        styles: { fontSize: 9, fillColor: [22, 27, 34], textColor: [200, 200, 200] },
-        headStyles: { fillColor: [0, 100, 130], textColor: [255, 255, 255] },
-        alternateRowStyles: { fillColor: [13, 17, 23] },
-        columnStyles: { 0: { cellWidth: 25 }, 1: { cellWidth: 50 } },
-      })
+    // Etiquetas de tipo en texto plano (sin emoji)
+    const getTypeText = (type: string): string => {
+      const map: Record<string, string> = {
+        race:        'Carrera',
+        training:    'Entreno',
+        maintenance: 'Mant.',
+      }
+      return map[type] ?? (getCategoryById(type)?.name ?? 'Evento')
     }
+
+    // Construir cuadricula del mes (semanas × 7 dias)
+    const monthStart = startOfMonth(currentMonth)
+    const monthEnd   = endOfMonth(currentMonth)
+    const calStart   = startOfWeek(monthStart, { weekStartsOn: 1 })
+    const calEnd     = endOfWeek(monthEnd,   { weekStartsOn: 1 })
+
+    const weeks: Date[][] = []
+    let cur = calStart
+    while (cur <= calEnd) {
+      const week: Date[] = []
+      for (let i = 0; i < 7; i++) { week.push(cur); cur = addDays(cur, 1) }
+      weeks.push(week)
+    }
+
+    const todayDate = new Date()
+
+    const tableBody = weeks.map(week =>
+      week.map(day => {
+        const inMonth      = isSameMonth(day, currentMonth)
+        const isCurrentDay = isSameDay(day, todayDate)
+        const dayEvents    = allEvents.filter(e => isSameDay(parseISO(e.date), day))
+
+        const lines = [format(day, 'd')]
+        dayEvents.slice(0, 3).forEach(ev => {
+          const label = getTypeText(ev.type)
+          const title = ev.title.length > 18 ? ev.title.substring(0, 17) + '...' : ev.title
+          lines.push(`[${label}] ${title}`)
+        })
+        if (dayEvents.length > 3) lines.push(`+${dayEvents.length - 3} mas`)
+
+        return {
+          content: lines.join('\n'),
+          styles: {
+            textColor: inMonth ? [210, 210, 210] : [70, 70, 70],
+            fillColor: isCurrentDay ? [20, 55, 80] : [22, 27, 34],
+            fontStyle: isCurrentDay ? 'bold' : 'normal',
+          } as Record<string, unknown>,
+        }
+      })
+    )
+
+    autoTable(doc, {
+      startY: 27,
+      head: [['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom']],
+      body: tableBody,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [0, 100, 130],
+        textColor: [255, 255, 255],
+        halign: 'center',
+        fontSize: 9,
+        fontStyle: 'bold',
+      },
+      styles: {
+        fontSize: 7,
+        fillColor: [22, 27, 34],
+        textColor: [210, 210, 210],
+        cellPadding: 2,
+        valign: 'top',
+        minCellHeight: 28,
+        lineColor: [50, 60, 70],
+        lineWidth: 0.3,
+      },
+      alternateRowStyles: {},
+      columnStyles: {
+        0: { cellWidth: 38 }, 1: { cellWidth: 38 }, 2: { cellWidth: 38 },
+        3: { cellWidth: 38 }, 4: { cellWidth: 38 }, 5: { cellWidth: 38 },
+        6: { cellWidth: 38 },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.cell.raw && typeof data.cell.raw === 'object') {
+          const raw = data.cell.raw as { content: string; styles?: Record<string, unknown> }
+          if (raw.styles) Object.assign(data.cell.styles, raw.styles)
+        }
+      },
+    })
 
     doc.save(`SMC-calendario-${format(currentMonth, 'yyyy-MM')}.pdf`)
   }
