@@ -5,7 +5,7 @@ import { calendarApi, CalendarEventItem } from '@/services/api/calendar.api'
 import { raceApi } from '@/services/api/race.api'
 import { trainingApi } from '@/services/api/training.api'
 import { maintenanceApi } from '@/services/api/maintenance.api'
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth, isSameDay, parseISO, isToday, startOfDay } from 'date-fns'
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth, isSameDay, parseISO, isToday, startOfDay, isAfter } from 'date-fns'
 import { es } from 'date-fns/locale'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -84,6 +84,11 @@ export default function CalendarIndex() {
 
   // Overflow day modal
   const [overflowDay, setOverflowDay] = useState<Date | null>(null)
+
+  // PDF export modal
+  const [showPdfModal, setShowPdfModal] = useState(false)
+  const [pdfFrom, setPdfFrom] = useState('')
+  const [pdfTo, setPdfTo]     = useState('')
 
   // Categories state (localStorage)
   const [categories, setCategories] = useState<CalendarCategory[]>(loadCategories)
@@ -240,11 +245,20 @@ export default function CalendarIndex() {
 
   // ─── PDF export ───────────────────────────────────────────────────────────
 
-  const exportCalendarPDF = () => {
-    const doc = new jsPDF({ orientation: 'landscape' })
-    const monthLabel = format(currentMonth, 'MMMM yyyy', { locale: es })
+  // Etiquetas de tipo en texto plano (sin emoji — jsPDF/Helvetica no los soporta)
+  const getTypeText = (type: string): string => {
+    const map: Record<string, string> = {
+      race:        'Carrera',
+      training:    'Entreno',
+      maintenance: 'Mant.',
+    }
+    return map[type] ?? (getCategoryById(type)?.name ?? 'Evento')
+  }
 
-    // Cabecera — sin emojis (jsPDF/Helvetica no los soporta)
+  // Renderiza una página de calendario mensual en el doc jsPDF dado
+  const renderMonthPage = (doc: InstanceType<typeof jsPDF>, month: Date, todayDate: Date) => {
+    const monthLabel = format(month, 'MMMM yyyy', { locale: es })
+
     doc.setFontSize(16)
     doc.setTextColor(0, 180, 220)
     doc.text(`SMC Greenpower - Calendario: ${monthLabel}`, 14, 16)
@@ -252,19 +266,8 @@ export default function CalendarIndex() {
     doc.setTextColor(130, 130, 130)
     doc.text(`Generado: ${new Date().toLocaleString('es-ES')}`, 14, 22)
 
-    // Etiquetas de tipo en texto plano (sin emoji)
-    const getTypeText = (type: string): string => {
-      const map: Record<string, string> = {
-        race:        'Carrera',
-        training:    'Entreno',
-        maintenance: 'Mant.',
-      }
-      return map[type] ?? (getCategoryById(type)?.name ?? 'Evento')
-    }
-
-    // Construir cuadricula del mes (semanas × 7 dias)
-    const monthStart = startOfMonth(currentMonth)
-    const monthEnd   = endOfMonth(currentMonth)
+    const monthStart = startOfMonth(month)
+    const monthEnd   = endOfMonth(month)
     const calStart   = startOfWeek(monthStart, { weekStartsOn: 1 })
     const calEnd     = endOfWeek(monthEnd,   { weekStartsOn: 1 })
 
@@ -276,11 +279,9 @@ export default function CalendarIndex() {
       weeks.push(week)
     }
 
-    const todayDate = new Date()
-
     const tableBody = weeks.map(week =>
       week.map(day => {
-        const inMonth      = isSameMonth(day, currentMonth)
+        const inMonth      = isSameMonth(day, month)
         const isCurrentDay = isSameDay(day, todayDate)
         const dayEvents    = allEvents.filter(e => isSameDay(parseISO(e.date), day))
 
@@ -308,28 +309,12 @@ export default function CalendarIndex() {
       head: [['Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab', 'Dom']],
       body: tableBody,
       theme: 'grid',
-      headStyles: {
-        fillColor: [0, 100, 130],
-        textColor: [255, 255, 255],
-        halign: 'center',
-        fontSize: 9,
-        fontStyle: 'bold',
-      },
-      styles: {
-        fontSize: 7,
-        fillColor: [22, 27, 34],
-        textColor: [210, 210, 210],
-        cellPadding: 2,
-        valign: 'top',
-        minCellHeight: 28,
-        lineColor: [50, 60, 70],
-        lineWidth: 0.3,
-      },
+      headStyles: { fillColor: [0, 100, 130], textColor: [255, 255, 255], halign: 'center', fontSize: 9, fontStyle: 'bold' },
+      styles: { fontSize: 7, fillColor: [22, 27, 34], textColor: [210, 210, 210], cellPadding: 2, valign: 'top', minCellHeight: 28, lineColor: [50, 60, 70], lineWidth: 0.3 },
       alternateRowStyles: {},
       columnStyles: {
         0: { cellWidth: 38 }, 1: { cellWidth: 38 }, 2: { cellWidth: 38 },
-        3: { cellWidth: 38 }, 4: { cellWidth: 38 }, 5: { cellWidth: 38 },
-        6: { cellWidth: 38 },
+        3: { cellWidth: 38 }, 4: { cellWidth: 38 }, 5: { cellWidth: 38 }, 6: { cellWidth: 38 },
       },
       didParseCell: (data) => {
         if (data.section === 'body' && data.cell.raw && typeof data.cell.raw === 'object') {
@@ -338,8 +323,28 @@ export default function CalendarIndex() {
         }
       },
     })
+  }
 
-    doc.save(`SMC-calendario-${format(currentMonth, 'yyyy-MM')}.pdf`)
+  // Genera PDF con una o varias páginas (una por mes en el rango from→to)
+  const exportCalendarPDF = (from: string, to: string) => {
+    const doc = new jsPDF({ orientation: 'landscape' })
+    const todayDate = new Date()
+
+    let cur = parseISO(from + '-01')
+    const end = parseISO(to + '-01')
+    let firstPage = true
+
+    while (!isAfter(cur, end)) {
+      if (!firstPage) doc.addPage()
+      firstPage = false
+      renderMonthPage(doc, cur, todayDate)
+      cur = addMonths(cur, 1)
+    }
+
+    const fileName = from === to
+      ? `SMC-calendario-${from}.pdf`
+      : `SMC-calendario-${from}-al-${to}.pdf`
+    doc.save(fileName)
   }
 
   const DAY_NAMES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
@@ -363,7 +368,16 @@ export default function CalendarIndex() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setCurrentMonth(new Date())} className="btn-secondary text-sm py-1.5">Hoy</button>
-          <button onClick={exportCalendarPDF} className="btn-secondary text-sm flex items-center gap-1 py-1.5" title="Exportar PDF del mes">
+          <button
+            onClick={() => {
+              const cm = format(currentMonth, 'yyyy-MM')
+              setPdfFrom(cm)
+              setPdfTo(cm)
+              setShowPdfModal(true)
+            }}
+            className="btn-secondary text-sm flex items-center gap-1 py-1.5"
+            title="Exportar PDF del calendario"
+          >
             <Download className="w-4 h-4" /> PDF
           </button>
           <button onClick={() => setShowCatManager(true)} className="btn-secondary text-sm flex items-center gap-1 py-1.5" title="Gestionar categorías">
@@ -741,6 +755,84 @@ export default function CalendarIndex() {
               <button onClick={() => setDeleteConfirmId(null)} className="btn-secondary text-sm py-1.5">Cancelar</button>
               <button onClick={() => deleteMutation.mutate(deleteConfirmId)} disabled={deleteMutation.isPending} className="btn-danger text-sm py-1.5">
                 {deleteMutation.isPending ? 'Eliminando...' : 'Eliminar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF export modal — selección de meses */}
+      {showPdfModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-smc-card border border-smc-border rounded-xl p-6 w-full max-w-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-white flex items-center gap-2">
+                <Download className="w-4 h-4 text-primary" /> Exportar calendario PDF
+              </h3>
+              <button onClick={() => setShowPdfModal(false)} className="text-smc-muted hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-smc-muted mb-4">
+              Selecciona el rango de meses que quieres incluir en el PDF. Cada mes ocupa una página.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-smc-muted mb-1">Desde</label>
+                <input
+                  type="month"
+                  value={pdfFrom}
+                  onChange={e => {
+                    setPdfFrom(e.target.value)
+                    if (e.target.value > pdfTo) setPdfTo(e.target.value)
+                  }}
+                  className="input-field text-sm w-full"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-smc-muted mb-1">Hasta</label>
+                <input
+                  type="month"
+                  value={pdfTo}
+                  min={pdfFrom}
+                  onChange={e => setPdfTo(e.target.value)}
+                  className="input-field text-sm w-full"
+                />
+              </div>
+            </div>
+
+            {pdfFrom && pdfTo && (
+              <p className="text-xs text-smc-muted mt-3">
+                {pdfFrom === pdfTo
+                  ? `1 mes · ${format(parseISO(pdfFrom + '-01'), 'MMMM yyyy', { locale: es })}`
+                  : (() => {
+                      let count = 0
+                      let c = parseISO(pdfFrom + '-01')
+                      const e = parseISO(pdfTo + '-01')
+                      while (!isAfter(c, e)) { count++; c = addMonths(c, 1) }
+                      return `${count} meses · de ${format(parseISO(pdfFrom + '-01'), 'MMMM yyyy', { locale: es })} a ${format(parseISO(pdfTo + '-01'), 'MMMM yyyy', { locale: es })}`
+                    })()
+                }
+              </p>
+            )}
+
+            <div className="flex gap-2 mt-4">
+              <button onClick={() => setShowPdfModal(false)} className="btn-secondary flex-1 text-sm py-1.5">
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  if (pdfFrom && pdfTo) {
+                    exportCalendarPDF(pdfFrom, pdfTo)
+                    setShowPdfModal(false)
+                  }
+                }}
+                disabled={!pdfFrom || !pdfTo}
+                className="btn-primary flex-1 text-sm py-1.5 flex items-center justify-center gap-1"
+              >
+                <Download className="w-3.5 h-3.5" /> Descargar
               </button>
             </div>
           </div>
