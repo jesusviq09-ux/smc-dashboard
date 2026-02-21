@@ -5,7 +5,7 @@ import { calendarApi, CalendarEventItem } from '@/services/api/calendar.api'
 import { raceApi } from '@/services/api/race.api'
 import { trainingApi } from '@/services/api/training.api'
 import { maintenanceApi } from '@/services/api/maintenance.api'
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth, isSameDay, parseISO, isToday, startOfDay, isAfter } from 'date-fns'
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, addMonths, subMonths, isSameMonth, isSameDay, parseISO, isToday, startOfDay, isAfter, isValid } from 'date-fns'
 import { es } from 'date-fns/locale'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -332,13 +332,16 @@ export default function CalendarIndex() {
 
     let cur = parseISO(from + '-01')
     const end = parseISO(to + '-01')
-    let firstPage = true
+    if (!isValid(cur) || !isValid(end)) return   // guardia contra fechas inválidas
 
-    while (!isAfter(cur, end)) {
+    let firstPage = true
+    let safety = 0
+    while (!isAfter(cur, end) && safety < 60) {  // safety cap: máx 60 meses (5 años)
       if (!firstPage) doc.addPage()
       firstPage = false
       renderMonthPage(doc, cur, todayDate)
       cur = addMonths(cur, 1)
+      safety++
     }
 
     const fileName = from === to
@@ -808,11 +811,13 @@ export default function CalendarIndex() {
                 {pdfFrom === pdfTo
                   ? `1 mes · ${format(parseISO(pdfFrom + '-01'), 'MMMM yyyy', { locale: es })}`
                   : (() => {
-                      let count = 0
-                      let c = parseISO(pdfFrom + '-01')
-                      const e = parseISO(pdfTo + '-01')
-                      while (!isAfter(c, e)) { count++; c = addMonths(c, 1) }
-                      return `${count} meses · de ${format(parseISO(pdfFrom + '-01'), 'MMMM yyyy', { locale: es })} a ${format(parseISO(pdfTo + '-01'), 'MMMM yyyy', { locale: es })}`
+                      const f = parseISO(pdfFrom + '-01')
+                      const t = parseISO(pdfTo   + '-01')
+                      if (!isValid(f) || !isValid(t)) return ''
+                      const count = (t.getFullYear() - f.getFullYear()) * 12
+                                  + (t.getMonth()   - f.getMonth()) + 1
+                      if (count < 1) return ''
+                      return `${count} meses · de ${format(f, 'MMMM yyyy', { locale: es })} a ${format(t, 'MMMM yyyy', { locale: es })}`
                     })()
                 }
               </p>
