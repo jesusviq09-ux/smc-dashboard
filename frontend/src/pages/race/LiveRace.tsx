@@ -1,6 +1,6 @@
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, Play, Pause, RefreshCw, AlertTriangle, CheckCircle, Star, Clock } from 'lucide-react'
+import { ChevronLeft, Play, Pause, RefreshCw, AlertTriangle, CheckCircle, Star, Clock, Zap } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { raceApi } from '@/services/api/race.api'
 import { pilotsApi } from '@/services/api/pilots.api'
@@ -183,6 +183,13 @@ export default function LiveRace() {
     return strategy.stints[currentStintNum - 1]
   }
 
+  // Amp consumption tracker
+  const TARGET_AMPS = 30
+  const TOTAL_BATTERY_AMPS = 32
+  const ampPerSecond = TARGET_AMPS / durationSeconds
+  const expectedAmpConsumed = ampPerSecond * timer.elapsed
+  const ampConsumedPct = Math.min(100, (expectedAmpConsumed / TARGET_AMPS) * 100)
+
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       {/* Header */}
@@ -223,6 +230,31 @@ export default function LiveRace() {
               style={{ width: `${timer.progressPct}%` }}
             />
           </div>
+
+          {/* Amp consumption tracker */}
+          {timer.elapsed > 0 && (
+            <div className="border-t border-smc-border pt-4 mt-2 mb-4">
+              <div className="flex justify-between items-center mb-2">
+                <div className="flex items-center gap-1.5 text-xs text-smc-muted uppercase tracking-wider">
+                  <Zap className="w-3.5 h-3.5 text-warning" />
+                  Consumo esperado
+                </div>
+                <div>
+                  <span className="text-2xl font-mono font-bold text-warning">{expectedAmpConsumed.toFixed(1)}</span>
+                  <span className="text-sm text-smc-muted"> / {TARGET_AMPS} A</span>
+                </div>
+              </div>
+              <div className="h-2 bg-smc-darker rounded-full overflow-hidden mb-1.5">
+                <div
+                  className="h-full bg-warning transition-all duration-1000 rounded-full"
+                  style={{ width: `${ampConsumedPct}%` }}
+                />
+              </div>
+              <p className="text-xs text-smc-muted text-center">
+                Batería total: {TOTAL_BATTERY_AMPS} A · Tasa: {(ampPerSecond * 60).toFixed(2)} A/min
+              </p>
+            </div>
+          )}
 
           <div className="flex justify-center gap-3">
             {!timer.isFinished && (
